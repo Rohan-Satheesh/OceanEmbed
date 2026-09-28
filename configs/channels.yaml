@@ -1,0 +1,77 @@
+# Surface input channel catalog (PRD Section 7.1, Chunk 2).
+# One entry per channel; `source` selects the downloader module in data/sources/.
+# `dataset_id` values are confirmed against the live Copernicus Marine catalogue /
+# NASA Earthdata CMR at pipeline-build time — re-verify with
+# `copernicusmarine.describe(contains=[...])` / `earthaccess.search_data(short_name=...)`
+# if a download starts failing, since providers do rename/retire dataset versions.
+
+channels:
+  sst:
+    label: "Sea Surface Temperature (OSTIA)"
+    source: copernicus
+    dataset_id: "METOFFICE-GLO-SST-L4-REP-OBS-SST"
+    variables: ["analysed_sst"]
+    native_resolution_deg: 0.05
+    units: "degC"
+    unit_conversion: "kelvin_to_celsius"  # OSTIA ships analysed_sst in Kelvin
+    processing: "conservative_regrid,land_mask"
+
+  sss:
+    label: "Sea Surface Salinity (SMAP/SMOS multi-sensor L4)"
+    source: copernicus
+    dataset_id: "cmems_obs-mob_glo_phy-sss_my_multi_P1D"
+    variables: ["sos"]
+    native_resolution_deg: 0.125
+    units: "psu"
+    unit_conversion: null
+    processing: "conservative_regrid,rfi_coastal_flagging,mask_aware"
+    available_from: "2015-01-01"  # SMAP era — earlier days are entirely masked, not dropped
+
+  ssh:
+    label: "Sea Surface Height / SLA (DUACS)"
+    source: copernicus
+    # Confirmed via copernicusmarine.describe(): the multi-year (my) reprocessed DUACS product
+    # only ships at 0.125deg (no 0.25deg my-mode variant); NRT ships 0.25deg but doesn't cover
+    # the historical 2015-2021 training window, so we take my-mode 0.125deg and conservatively
+    # regrid down to 0.25deg like every other channel (PRD Section 10.3).
+    dataset_id: "cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1D"
+    variables: ["sla", "adt"]
+    native_resolution_deg: 0.125
+    units: "m"
+    unit_conversion: null
+    processing: "minimal_regrid,quality_check"
+
+  currents:
+    label: "Surface Currents (OSCAR L4 Final)"
+    source: earthdata
+    short_name: "OSCAR_L4_OC_FINAL_V2.0"
+    variables: ["u", "v"]
+    native_resolution_deg: 0.25
+    units: "m s-1"
+    unit_conversion: null
+    processing: "regrid_if_needed,unit_check"
+
+  winds:
+    label: "Surface Winds (CCMP 10m L4 v3.1)"
+    source: earthdata
+    short_name: "CCMP_WINDS_10M6HR_L4_V3.1"
+    variables: ["uwnd", "vwnd"]
+    native_resolution_deg: 0.25
+    native_temporal_resolution: "6-hourly"
+    units: "m s-1"
+    unit_conversion: null
+    processing: "daily_aggregation,regrid_if_needed"
+
+bathymetry:
+  # GEBCO 2024 has no stable, unauthenticated bbox-subset API at pipeline-build time (its
+  # OPeNDAP access lives behind a CEDA account/token, and its own WCS/download-app endpoints
+  # aren't stable/documented enough to script against). ETOPO 2022 (NOAA NCEI) is used instead:
+  # same GEBCO-family global relief data lineage, same elevation-sign convention (negative =
+  # below sea level), served with a simple, no-auth, bbox-subsettable ERDDAP griddap URL.
+  label: "NOAA NCEI ETOPO 2022 (60 arc-second) global relief model"
+  source: etopo
+  url: "https://www.ncei.noaa.gov/products/etopo-global-relief-model"
+  # ERDDAP griddap base URL (bbox appended at request time as query params: variable[(lat_lo):(lat_hi)][(lon_lo):(lon_hi)]).
+  opendap_url: "https://oceanwatch.pifsc.noaa.gov/erddap/griddap/ETOPO_2022_v1_60s"
+  variable: "z"
+  land_fraction_threshold: 0.5  # cells with >50% land area are excluded (PRD Section 4.2)

@@ -10,12 +10,16 @@ dependencies:
   - xesmf
   - esmpy
   - netcdf4
+  - h5py  # copernicusmarine writes NetCDF via h5netcdf, which needs h5py as its backend
+  - cftime  # some PO.DAAC products decode `time` on a non-standard calendar via cftime
   - cartopy
   - numpy
   - scipy
   - pandas
   - scikit-learn
   - matplotlib
+  - requests
+  - bottleneck  # required by xarray's ffill/bfill(limit=...), used for short-gap fill (PRD 10.4)
   - pip:
       # PyTorch installed via pip (not conda-forge) with CUDA 12.8 wheels: conda-forge's
       # pytorch-cuda builds lag behind new GPU architectures, and only the official cu128
@@ -29,6 +33,7 @@ dependencies:
       - streamlit
       - plotly
       - python-dotenv
+      - pyyaml
       - hydra-core
       - omegaconf
       - wandb
