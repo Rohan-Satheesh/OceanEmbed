@@ -1,0 +1,25 @@
+# Pip-only fallback environment. Prefer environment.yml (conda) where possible:
+# xESMF depends on ESMF/ESMPy, which is far more reliable installed via conda-forge
+# than via pip, especially on Windows. If you must use pip/venv, install ESMF
+# separately first, or run preprocessing inside WSL2 / a conda env.
+torch --index-url https://download.pytorch.org/whl/cu121
+xarray
+dask[array]
+zarr
+netCDF4
+cartopy
+numpy
+scipy
+pandas
+scikit-learn
+matplotlib
+copernicusmarine
+earthaccess
+streamlit
+plotly
+python-dotenv
+hydra-core
+omegaconf
+wandb
+argopy
+pytest

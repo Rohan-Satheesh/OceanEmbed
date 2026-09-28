@@ -1,0 +1,37 @@
+name: oceanembed
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - xarray
+  - dask
+  - zarr
+  - xesmf
+  - esmpy
+  - netcdf4
+  - cartopy
+  - numpy
+  - scipy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - pip:
+      # PyTorch installed via pip (not conda-forge) with CUDA 12.8 wheels: conda-forge's
+      # pytorch-cuda builds lag behind new GPU architectures, and only the official cu128
+      # wheels currently support Blackwell (sm_120, e.g. RTX 50-series laptops/desktops).
+      # These wheels remain backward-compatible with older GPUs (e.g. Kaggle/Colab T4/P100),
+      # so this is safe as the one standard build across local and free-tier compute.
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch
+      - copernicusmarine
+      - earthaccess
+      - streamlit
+      - plotly
+      - python-dotenv
+      - hydra-core
+      - omegaconf
+      - wandb
+      - argopy
+      - pytest
+      - importlib_metadata<7  # pin: esmpy 8.4.2 KeyErrors on blank metadata fields with importlib_metadata>=7

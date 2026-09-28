@@ -1,0 +1,26 @@
+# Base run configuration (PRD Section 22.2). Per-experiment configs override
+# these via Hydra composition or a plain YAML merge.
+
+project: oceanembed
+
+domain:
+  lat_min: 5.0
+  lat_max: 30.0
+  lon_min: 45.0
+  lon_max: 105.0
+  resolution_deg: 0.25
+
+depths_m: [0, 5, 10, 20, 30, 50, 75, 100, 125, 150, 200, 300, 500, 700, 1000]
+
+periods:
+  train: ["2015-01-01", "2021-12-31"]
+  validation: ["2022-01-01", "2022-12-31"]
+  test: ["2023-01-01", "2024-12-31"]
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  runs_dir: training/runs
+  checkpoints_dir: training/runs/checkpoints
+
+seed: 42

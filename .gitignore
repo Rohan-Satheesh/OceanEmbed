@@ -1,0 +1,29 @@
+# Environments
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Data (never commit raw/processed satellite or model data)
+data/raw/
+data/processed/
+*.nc
+*.zarr/
+*.grib
+
+# Model checkpoints / experiment tracking
+training/runs/
+*.ckpt
+*.pt
+*.pth
+wandb/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
