@@ -7,6 +7,7 @@ pair so a run doesn't rebuild ESMF weights for every day of the same channel.
 from __future__ import annotations
 
 import hashlib
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +39,13 @@ def standardize_latlon(ds: xr.Dataset) -> xr.Dataset:
     if not rename:
         return ds
 
-    ds = ds.rename(rename)
+    # xarray warns here that rename() alone won't create an index when the target name
+    # already exists as a dangling (non-dimension) coordinate variable — e.g. OSCAR's case.
+    # That's expected and handled by the set_index() call immediately below, so the warning
+    # is suppressed rather than left to alarm callers about something already fixed.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="rename '.*' to '.*' does not create an index anymore")
+        ds = ds.rename(rename)
     to_index = [c for c in ("lat", "lon") if c in ds.coords and c not in ds.indexes]
     if to_index:
         ds = ds.set_index({c: c for c in to_index})

@@ -45,7 +45,13 @@ def _normalize_time_dtype(ds: xr.Dataset) -> xr.Dataset:
         return ds
     values = ds["time"].values
     if len(values) and isinstance(values[0], cftime.datetime):
-        return ds.assign_coords(time=xr.CFTimeIndex(values).to_datetimeindex())
+        # unsafe=True: silences xarray's calendar-mismatch warning. Verified intentional here —
+        # this preserves the same Y-M-D labels (see test_normalize_time_dtype_converts_cftime_datetimes),
+        # which is what daily cross-source alignment needs; it is not doing elapsed-time arithmetic
+        # across a range where Julian/Gregorian would actually diverge.
+        return ds.assign_coords(
+            time=xr.CFTimeIndex(values).to_datetimeindex(unsafe=True, time_unit="ns")
+        )
     return ds.assign_coords(time=pd.to_datetime(values))
 
 
