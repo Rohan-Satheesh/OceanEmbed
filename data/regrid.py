@@ -16,8 +16,6 @@ import xesmf as xe
 
 from data.catalog import Domain
 
-WEIGHTS_DIR_NAME = "regrid_weights"
-
 
 def standardize_latlon(ds: xr.Dataset) -> xr.Dataset:
     """Rename whatever this provider calls its spatial dims/coords to lat/lon.
