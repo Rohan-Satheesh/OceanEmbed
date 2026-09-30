@@ -155,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--mc", type=int, default=10)
     args = ap.parse_args(argv)
     cfg = load_base_config(override=None if args.config == "none" else args.config)
-    rep = build_report(cfg, args.main, args.main, args.stride, args.mc)
+    build_report(cfg, args.main, args.main, args.stride, args.mc)
     print((REPO_ROOT / cfg.paths["runs_dir"] / f"report_{cfg.data_source}.md").read_text(encoding="utf-8"))
     return 0
 

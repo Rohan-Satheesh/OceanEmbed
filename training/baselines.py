@@ -21,7 +21,7 @@ from sklearn.ensemble import RandomForestRegressor
 
 from data.catalog import BaseConfig, load_base_config
 from evaluation import metrics as M
-from training.data import (INPUT_NAMES, REPO_ROOT, Normalizer, StoreArrays, eval_positions, load_arrays,
+from training.data import (REPO_ROOT, Normalizer, StoreArrays, eval_positions, load_arrays,
                            split_indices)
 from training.run_logger import RunLogger
 

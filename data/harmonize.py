@@ -133,10 +133,3 @@ def append_zarr(ds: xr.Dataset, channel: Channel, out_dir: Path) -> Path:
     else:
         chunked.to_zarr(zarr_path, mode="a", group=channel.name)
     return zarr_path
-    chunked = ds.chunk({"time": 30})
-
-    if group_exists:
-        chunked.to_zarr(zarr_path, mode="a", append_dim="time", group=channel.name)
-    else:
-        chunked.to_zarr(zarr_path, mode="a", group=channel.name)
-    return zarr_path

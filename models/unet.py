@@ -39,7 +39,6 @@ class UNetTrunk(nn.Module):
         self.d3 = ConvBlock(base * 8 + base * 4, base * 4, dropout)
         self.d2 = ConvBlock(base * 4 + base * 2, base * 2, dropout)
         self.d1 = ConvBlock(base * 2 + base, base, dropout)
-        self.out_ch = base
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h, w = x.shape[-2:]
