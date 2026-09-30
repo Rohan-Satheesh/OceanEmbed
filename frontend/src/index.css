@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --color-abyss-950: #04141c;
+  --color-abyss-900: #071c27;
+  --color-abyss-800: #0c2836;
+  --color-abyss-700: #123444;
+  --color-abyss-600: #1b4657;
+  --color-abyss-500: #2a6074;
+
+  --color-surf-400: #38e3d8;
+  --color-surf-500: #1fc9c2;
+  --color-surf-600: #12a3a6;
+
+  --color-sand-300: #f3e4c0;
+  --color-sand-400: #e8c98a;
+
+  --color-coral-500: #ff7a59;
+  --color-coral-600: #f06148;
+}
+
+/* Dark mode re-points the sand (page / light-surface) tokens at deep-sea navy; the abyss panels are
+   already dark and stay as-is. */
+:root.dark {
+  --color-sand-300: #081a24;
+  --color-sand-400: #1b4657;
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-sand-300 text-slate-200 antialiased;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-abyss-800/70 border border-abyss-600/60 backdrop-blur-sm;
+  }
+
+  .range-slider {
+    @apply h-2 w-full cursor-pointer appearance-none rounded-full bg-abyss-600 accent-surf-500;
+  }
+  .range-slider::-webkit-slider-thumb {
+    @apply h-4 w-4 appearance-none rounded-full bg-surf-400 shadow-[0_0_0_3px_rgba(56,227,216,0.2)];
+  }
+  .range-slider:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-abyss-500 rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.page-fade-in {
+  animation: page-fade-in 900ms ease-out both;
+}

@@ -32,3 +32,10 @@ Thumbs.db
 CLAUDE.md
 .claude/
 data/synthetic/
+data/processed_fixed/
+data/processed_backup*/
+
+# Frontend (frontend/ — React, separate from the Streamlit dashboard/)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
