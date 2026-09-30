@@ -135,13 +135,15 @@ class WindowDataset(Dataset):
     """
 
     def __init__(self, arrays: StoreArrays, norm: Normalizer, split_idx: np.ndarray, window: int = 1,
-                 positions: np.ndarray | None = None):
+                 positions: np.ndarray | None = None, channels: list[int] | None = None):
         self.window = window
         self.idx = np.asarray(split_idx)
         lo, hi = int(self.idx[0]), int(self.idx[-1]) + 1
         self.offset = lo
         self.time = arrays.time[lo:hi]
         self.xv, self.xm = norm.x(arrays.x[lo:hi])
+        if channels is not None:                                   # input ablations (PRD 16): keep a subset of variables
+            self.xv, self.xm = self.xv[:, channels], self.xm[:, channels]
         self.yv, self.ym = norm.y(arrays.y[lo:hi])
         keep = self.idx if positions is None else np.asarray(positions)
         self.targets = np.array([t for t in keep if t - lo >= window - 1], dtype=int)
