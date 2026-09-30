@@ -20,7 +20,7 @@ const num = (v: number | null): number => (v === null ? NaN : v)
 
 // ---- mock ---------------------------------------------------------------------------------------
 
-export function createMockSource(): DataSource {
+function createMockSource(): DataSource {
   const ds = generateMockDataset()
   const meta: Meta = {
     times: ds.times,

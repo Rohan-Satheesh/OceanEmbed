@@ -1,6 +1,6 @@
 import { useEffect, useState, type DependencyList } from 'react'
 
-export interface AsyncState<T> {
+interface AsyncState<T> {
   data: T | undefined
   loading: boolean
   error: string | null

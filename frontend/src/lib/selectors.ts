@@ -1,6 +1,6 @@
 import { REGIONS, type Dataset, type MapVarKey, type Meta } from './types'
 
-export function nearestIndex(values: ArrayLike<number>, target: number): number {
+function nearestIndex(values: ArrayLike<number>, target: number): number {
   let best = 0
   let bestDist = Infinity
   for (let i = 0; i < values.length; i++) {
@@ -13,7 +13,7 @@ export function nearestIndex(values: ArrayLike<number>, target: number): number 
   return best
 }
 
-export function nearestCell(ds: Pick<Dataset, 'lats' | 'lons'>, lat: number, lon: number): { latIdx: number; lonIdx: number; lat: number; lon: number } {
+function nearestCell(ds: Pick<Dataset, 'lats' | 'lons'>, lat: number, lon: number): { latIdx: number; lonIdx: number; lat: number; lon: number } {
   const latIdx = nearestIndex(ds.lats, lat)
   const lonIdx = nearestIndex(ds.lons, lon)
   return { latIdx, lonIdx, lat: ds.lats[latIdx], lon: ds.lons[lonIdx] }

@@ -1,4 +1,4 @@
-export const TABS = ['Maps', 'Vertical profile', 'Time series', 'Regional summary', 'Model performance', 'About'] as const
+const TABS = ['Maps', 'Vertical profile', 'Time series', 'Regional summary', 'Model performance', 'About'] as const
 export type Tab = (typeof TABS)[number]
 
 interface TabNavProps {

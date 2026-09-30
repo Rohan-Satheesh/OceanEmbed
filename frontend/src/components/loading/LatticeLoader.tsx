@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import './LatticeLoader.css'
 
 type Grid = 3 | 4
-export type LatticeStatus = 'working' | 'done' | 'error'
+type LatticeStatus = 'working' | 'done' | 'error'
 type Cells = (number | null)[]
 interface PatternDef {
   cells: Cells

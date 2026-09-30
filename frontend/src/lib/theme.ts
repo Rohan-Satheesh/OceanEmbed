@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-export type Theme = 'light' | 'dark'
+type Theme = 'light' | 'dark'
 
 const KEY = 'oceanembed-theme'
 const listeners = new Set<() => void>()
@@ -25,7 +25,7 @@ export function initTheme() {
   apply(current)
 }
 
-export function setTheme(t: Theme) {
+function setTheme(t: Theme) {
   current = t
   apply(t)
   try { localStorage.setItem(KEY, t) } catch { /* ignore */ }
