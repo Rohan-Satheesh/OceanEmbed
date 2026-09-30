@@ -100,9 +100,20 @@ def append_zarr(ds: xr.Dataset, channel: Channel, out_dir: Path) -> Path:
     """
     zarr_path = out_dir / "zarr" / "oceanembed.zarr"
     zarr_path.parent.mkdir(parents=True, exist_ok=True)
+    group_exists = zarr_path.exists() and (zarr_path / channel.name).exists()
+    if group_exists:
+        # Idempotent re-runs: skip days already stored rather than appending duplicate time steps.
+        # (To overwrite existing days, delete the group first.)
+        with xr.open_zarr(zarr_path, group=channel.name, consolidated=False) as existing:
+            stored = existing["time"].values
+        already = np.isin(ds["time"].values, stored)
+        if already.any():
+            print(f"    [skip] {int(already.sum())} day(s) already in zarr group '{channel.name}'")
+            ds = ds.isel(time=~already)
+        if ds.sizes["time"] == 0:
+            return zarr_path
     chunked = ds.chunk({"time": 30})
 
-    group_exists = zarr_path.exists() and (zarr_path / channel.name).exists()
     if group_exists:
         chunked.to_zarr(zarr_path, mode="a", append_dim="time", group=channel.name)
     else:

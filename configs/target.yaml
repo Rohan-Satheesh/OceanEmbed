@@ -1,0 +1,41 @@
+# Target (GLORYS) + independent validation (ARGO) catalog (PRD Sections 8-9, Chunk 3).
+# Loaded by data.catalog.load_target_catalog(). Nothing else in the target/validation pipeline
+# hardcodes a dataset id, variable name, or grid bound.
+
+glorys:
+  label: "GLORYS12V1 Global Ocean Physics Reanalysis"
+  source: copernicus
+  # Confirmed live via copernicusmarine.describe(): DOI 10.48670/moi-00021 (PRD Section 8.1),
+  # 50 native vertical levels, variable `thetao` in degC (no unit conversion needed).
+  dataset_id: "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+  variables: ["thetao"]
+  native_resolution_deg: 0.083
+  units: "degC"
+  unit_conversion: null
+  processing: "conservative_regrid,vertical_interp,land_mask"
+  # Bounded a little past the deepest standard depth (1000m, configs/base.yaml depths_m) to give
+  # the vertical interpolation headroom without pulling the full water column.
+  min_depth_m: 0.0
+  max_depth_m: 1100.0
+
+argo:
+  label: "INCOIS ARGO 10-Day Gridded Product (Variational Analysis Methodology)"
+  source: incois_erddap
+  # Public ERDDAP griddap endpoint, no authentication required (unlike other INCOIS LAS
+  # interfaces) — confirmed live. PRD Section 9.1's "10Days Averaged" VAM product.
+  dataset_id: "incois_argo_10d_VAM"
+  erddap_base_url: "https://erddap.incois.gov.in/erddap/griddap/incois_argo_10d_VAM"
+  variables:
+    temp: "TEMP"
+    sal: "SAL"
+    temp_error: "TERR"
+    sal_error: "SERR"
+  native_resolution_deg: 1.0
+  # Cells where TERR/SERR exceed this threshold are masked as low-confidence. INCOIS doesn't
+  # document TERR/SERR's exact units/scale (named "relative error" but a live ERDDAP sample
+  # showed values clustering ~0.5-0.7, not the 0-50 range implied by TERR's own colorbar
+  # metadata) — 1.0 is a conservative pick that keeps the bulk of observed values while still
+  # filtering outliers; revisit once the full historical pull gives a proper distribution.
+  # Pragmatic QC substitute for per-profile QC flags (PRD Section 9.2), since this gridded
+  # analyzed product doesn't carry per-profile flags — see evaluation/argo.py::qc_argo().
+  max_error_threshold: 1.0

@@ -80,8 +80,10 @@ def apply_unit_conversion(ds: xr.Dataset, channel: Channel) -> xr.Dataset:
 def apply_land_mask(ds: xr.Dataset, land_sea: xr.Dataset, channel: Channel) -> xr.Dataset:
     out = ds.copy()
     sea = land_sea["sea_mask"].reindex_like(out, method="nearest")
-    for var in channel.variables:
-        if var in out:
+    # Mask every gridded data variable, not just channel.variables: derived fields (e.g. winds'
+    # `ws`, `nobs`) would otherwise stay unmasked over land while uwnd/vwnd are NaN there.
+    for var in list(out.data_vars):
+        if {"lat", "lon"} <= set(out[var].dims) and not var.endswith("_mask"):
             out[var] = out[var].where(sea)
     return out
 

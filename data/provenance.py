@@ -12,6 +12,8 @@ LICENSES = {
     "(https://www.earthdata.nasa.gov/learn/use-data/data-use-policy)",
     "etopo": "NOAA NCEI ETOPO 2022 Global Relief Model, public domain (U.S. Government work) "
     "(https://www.ncei.noaa.gov/products/etopo-global-relief-model)",
+    "incois_erddap": "INCOIS Live Access Server public ERDDAP data policy: free use and "
+    "redistribution, not warranted for legal use (https://las.incois.gov.in/)",
 }
 
 

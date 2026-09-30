@@ -27,6 +27,9 @@ RANGE_BOUNDS: dict[str, tuple[float, float]] = {
     "v": (-5.0, 5.0),
     "uwnd": (-60.0, 60.0),               # m/s (winds)
     "vwnd": (-60.0, 60.0),
+    "thetao": (-2.0, 35.0),           # degC (GLORYS target, PRD Section 8.3)
+    "TEMP": (-2.0, 40.0),               # degC (ARGO gridded VAM)
+    "SAL": (0.0, 45.0),                  # psu (ARGO gridded VAM)
 }
 
 

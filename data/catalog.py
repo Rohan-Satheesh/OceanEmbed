@@ -28,6 +28,8 @@ class Channel:
     short_name: str | None = None        # earthaccess CMR short_name
     available_from: str | None = None    # ISO date; earlier days are masked, not fetched
     native_temporal_resolution: str = "daily"
+    min_depth_m: float | None = None     # copernicusmarine depth-subset bound (Chunk 3 target)
+    max_depth_m: float | None = None
 
     @property
     def processing_steps(self) -> list[str]:
@@ -72,6 +74,33 @@ def load_catalog(path: Path | str | None = None) -> Catalog:
     }
     bathymetry = BathymetryConfig(**raw["bathymetry"])
     return Catalog(channels=channels, bathymetry=bathymetry)
+
+
+@dataclass(frozen=True)
+class ArgoConfig:
+    label: str
+    source: str
+    dataset_id: str
+    erddap_base_url: str
+    variables: dict[str, str]  # logical name -> ERDDAP variable name (TEMP, SAL, TERR, SERR)
+    native_resolution_deg: float
+    max_error_threshold: float
+
+
+@dataclass(frozen=True)
+class TargetCatalog:
+    glorys: Channel
+    argo: ArgoConfig
+
+
+def load_target_catalog(path: Path | str | None = None) -> TargetCatalog:
+    path = Path(path) if path else CONFIG_DIR / "target.yaml"
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+
+    glorys = Channel(name="glorys", **raw["glorys"])
+    argo = ArgoConfig(**raw["argo"])
+    return TargetCatalog(glorys=glorys, argo=argo)
 
 
 @dataclass(frozen=True)

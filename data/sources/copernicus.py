@@ -25,6 +25,11 @@ def download(channel: Channel, start: str, end: str, domain: Domain, out_dir: Pa
     out_filename = f"{channel.name}_{start}_{end}.nc"
 
     def _fetch():
+        depth_kwargs = {}
+        if channel.min_depth_m is not None:
+            depth_kwargs["minimum_depth"] = channel.min_depth_m
+        if channel.max_depth_m is not None:
+            depth_kwargs["maximum_depth"] = channel.max_depth_m
         return copernicusmarine.subset(
             dataset_id=channel.dataset_id,
             variables=channel.variables,
@@ -39,6 +44,7 @@ def download(channel: Channel, start: str, end: str, domain: Domain, out_dir: Pa
             file_format="netcdf",
             skip_existing=True,
             disable_progress_bar=True,
+            **depth_kwargs,
         )
 
     def _on_retry(attempt: int, exc: Exception) -> None:
