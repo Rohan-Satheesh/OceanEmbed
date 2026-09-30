@@ -1,6 +1,6 @@
 """Run the whole synthetic-data demo end to end (Chunks 4-8 on data/synthetic/):
 
-    python scripts/run_demo.py            # full reference run (~10 min on a laptop GPU)
+    python scripts/run_demo.py            # full reference run (~15 min on a laptop GPU)
     python scripts/run_demo.py --quick    # fewer epochs, for a fast smoke run
     python scripts/run_demo.py --full     # also run every ablation in training.experiments (~1 h)
     python scripts/run_demo.py --dry-run  # print the plan only

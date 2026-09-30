@@ -65,7 +65,7 @@ Switching to real data is a config change (`paths.processed_dir` in `configs/dem
 
 ```bash
 conda activate oceanembed
-python scripts/run_demo.py            # synthetic store -> baselines -> train -> predict -> report (~10 min, GPU)
+python scripts/run_demo.py            # synthetic store -> baselines -> train -> predict -> report (~15 min on a laptop GPU)
 python scripts/run_demo.py --quick    # fewer epochs
 python scripts/run_demo.py --full     # + every ablation (~1 h)
 streamlit run dashboard/app.py        # explore the results
