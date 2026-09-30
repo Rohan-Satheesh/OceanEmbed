@@ -15,6 +15,7 @@ Scores on this data only show the pipeline works end to end, never real-ocean sk
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -82,14 +83,14 @@ def load_geography(lat: np.ndarray, lon: np.ndarray, processed_dir: Path | None 
 
 
 # ------------------------------------------------------------------------------------- field pieces
-def _eddy_params(seed: int) -> dict[str, np.ndarray]:
+def _eddy_params(seed: int, n: int = N_EDDIES) -> dict[str, np.ndarray]:
     rng = np.random.default_rng(seed)
     return dict(
-        birth=rng.uniform(-150, SPAN_DAYS, N_EDDIES), life=rng.uniform(60, 180, N_EDDIES),
-        lat0=rng.uniform(6, 29, N_EDDIES), lon0=rng.uniform(46, 104, N_EDDIES),
-        vlon=-rng.uniform(0.02, 0.07, N_EDDIES), vlat=rng.normal(0, 0.012, N_EDDIES),
-        amp=rng.choice([-1.0, 1.0], N_EDDIES) * rng.uniform(0.06, 0.20, N_EDDIES),   # metres of SLA
-        rad=rng.uniform(1.0, 2.2, N_EDDIES),
+        birth=rng.uniform(-150, SPAN_DAYS, n), life=rng.uniform(60, 180, n),
+        lat0=rng.uniform(6, 29, n), lon0=rng.uniform(46, 104, n),
+        vlon=-rng.uniform(0.02, 0.07, n), vlat=rng.normal(0, 0.012, n),
+        amp=rng.choice([-1.0, 1.0], n) * rng.uniform(0.06, 0.20, n),   # metres of SLA
+        rad=rng.uniform(1.0, 2.2, n),
     )
 
 
@@ -119,9 +120,229 @@ def _coast_band(sea: np.ndarray, cells: int) -> np.ndarray:
     return sea & (distance_transform_edt(sea) <= cells)
 
 
+# ------------------------------------------------------------------------------------------ calibration
+@dataclass
+class Calibration:
+    """Real-data-derived inputs for the generator (see fit_calibration).
+
+    Maps are the real Q1-2022 means (smoothed, land/below-seafloor filled), so the synthetic ocean keeps the real
+    spatial structure (north-south SST gradient, Arabian Sea vs Bay of Bengal salinity, the deep-water structure
+    at 500-1000 m). Seasonality, eddies and noise are then added on top as anomalies around those means."""
+    sst_map: np.ndarray            # (H, W) deg C
+    sss_map: np.ndarray            # (H, W) psu
+    sla_map: np.ndarray            # (H, W) m
+    tbg: np.ndarray                # (Z, H, W) deg C, mean thetao profile at every cell
+    eddy_scale: float = 1.0        # multiplier on eddy SLA amplitude (fitted to real SLA statistics)
+    wind_ne_scale: float = 1.0     # multiplier on the NE-monsoon wind branch (fitted to real mean wind speed)
+    wind_noise_scale: float = 1.0  # multiplier on synoptic wind noise (fitted to real wind variability)
+    eddy_density: float = 1.0      # multiplier on the NUMBER of eddies (fitted with eddy_scale to real SLA statistics)
+    heave_per_m: float = 450.0     # thermocline displacement per metre of SLA (regressed on the real data)
+    sst_sla_coef: float = 5.0      # deg C of SST anomaly per metre of SLA (regressed on the real data)
+    sub_noise: float = 0.0         # deg C std of unexplained subsurface variability at 100 m (from the real residual)
+    source: str = ""
+    q1: dict = field(default_factory=dict)   # seasonal means over the calibration window (set by prepare)
+
+    def save(self, path: Path) -> None:
+        np.savez_compressed(path, sst_map=self.sst_map, sss_map=self.sss_map, sla_map=self.sla_map, tbg=self.tbg,
+                            scalars=np.array([self.eddy_scale, self.wind_ne_scale, self.wind_noise_scale, self.eddy_density,
+                                          self.heave_per_m, self.sst_sla_coef, self.sub_noise]),
+                            source=np.array(self.source))
+
+    @classmethod
+    def load(cls, path: Path) -> "Calibration":
+        z = np.load(path, allow_pickle=False)
+        e, ne, ns, dens, heave, coef, sub = (float(v) for v in z["scalars"])
+        return cls(z["sst_map"], z["sss_map"], z["sla_map"], z["tbg"], e, ne, ns, dens, heave, coef, sub, str(z["source"]))
+
+
+def _sst_seasonal(doy: int, lat2: np.ndarray) -> np.ndarray:
+    th = 2 * np.pi * (doy - 1) / 365.25
+    return 3.0 * np.clip((lat2 - 8) / 20, 0, 1) * np.cos(th - 2 * np.pi * 125 / 365.25)
+
+
+def _fresh(doy: int) -> float:
+    return 0.5 + 0.5 * np.cos(2 * np.pi * (doy - 1) / 365.25 - 2 * np.pi * 270 / 365.25)
+
+
+def _sla_seasonal(doy: int, lat2: np.ndarray) -> np.ndarray:
+    return 0.06 * np.sin(2 * np.pi * (doy - 1) / 365.25 - 1.0) * np.exp(-((lat2 - 12) / 10) ** 2)
+
+
+def prepare(cal: Calibration, lat: np.ndarray, lon: np.ndarray, doys=range(1, 91)) -> Calibration:
+    """Seasonal means over the calibration window (Q1), so anomalies are taken relative to what the maps hold."""
+    _, lat2 = np.meshgrid(lon, lat)
+    cal.q1 = {"sst_seas": np.mean([_sst_seasonal(d, lat2) for d in doys], axis=0),
+              "fresh": float(np.mean([_fresh(d) for d in doys])),
+              "sla_seas": np.mean([_sla_seasonal(d, lat2) for d in doys], axis=0)}
+    return cal
+
+
+def _heave(tbg: np.ndarray, depths: np.ndarray, delta: np.ndarray) -> np.ndarray:
+    """Vertically displace the mean profile: `delta` metres (positive = thermocline deeper, so warmer water at a
+    fixed depth). The displacement fades with depth (e-folding 800 m)."""
+    zq = np.clip(depths[:, None, None] - delta[None] * np.exp(-depths / 800.0)[:, None, None], depths[0], depths[-1])
+    k = np.clip(np.searchsorted(depths, zq, side="right") - 1, 0, len(depths) - 2)
+    w = (zq - depths[k]) / (depths[k + 1] - depths[k])
+    return np.take_along_axis(tbg, k, 0) * (1 - w) + np.take_along_axis(tbg, k + 1, 0) * w
+
+
+_SLOW_CACHE: dict = {}
+
+
+def _slow_field(day: int, shape: tuple[int, int], seed: int, n_modes: int = 8) -> np.ndarray:
+    """Spatially smooth, temporally smooth (periods 12-70 days), unit-std field that is a pure function of
+    (day, seed): stands in for subsurface variability the surface fields do not explain."""
+    key = (seed, shape, n_modes)
+    if key not in _SLOW_CACHE:
+        rng = np.random.default_rng([seed, 4242])
+        pats = np.stack([gaussian_filter(rng.standard_normal(shape), 6) for _ in range(n_modes)])
+        pats /= pats.std(axis=(1, 2), keepdims=True)
+        _SLOW_CACHE[key] = (pats, rng.uniform(12, 70, n_modes), rng.uniform(0, 2 * np.pi, n_modes))
+    pats, periods, phases = _SLOW_CACHE[key]
+    w = np.cos(2 * np.pi * day / periods + phases) / np.sqrt(n_modes / 2.0)
+    return np.tensordot(w, pats, axes=(0, 0))
+
+
+def _winds(m: float, g: np.ndarray, jet: np.ndarray, rw: np.random.Generator, shape: tuple[int, int],
+           k_ne: float = 1.0, noise: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """Monsoon wind components. k_ne = 1, noise = 1 reproduces the uncalibrated generator."""
+    u = g * jet * (2.0 * k_ne * min(m, 0.0) + 6.5 * max(m, 0.0)) + _smooth_noise(rw, shape, 5, 1.2 * noise)
+    v = g * jet * (1.5 * k_ne * min(m, 0.0) + 3.0 * max(m, 0.0)) + _smooth_noise(rw, shape, 5, 1.0 * noise)
+    return u, v
+
+
+def _fill_nearest(a: np.ndarray) -> np.ndarray:
+    bad = np.isnan(a)
+    if not bad.any():
+        return a
+    return a[tuple(distance_transform_edt(bad, return_distances=False, return_indices=True))]
+
+
+def _smooth_map(a: np.ndarray, sigma: float) -> np.ndarray:
+    a = _fill_nearest(a)
+    return gaussian_filter(a, sigma) if sigma > 0 else a
+
+
+def _fill_profiles(tbg: np.ndarray, sigma: float) -> np.ndarray:
+    """Smooth each depth level over its VALID cells only (normalized convolution), then fill land and below-seafloor
+    cells from the nearest valid neighbour at that depth, so shelf/filled values never bleed into deep water."""
+    out = np.empty_like(tbg)
+    for k in range(tbg.shape[0]):
+        a = tbg[k]
+        valid = ~np.isnan(a)
+        if sigma > 0:
+            num = gaussian_filter(np.where(valid, a, 0.0), sigma)
+            den = gaussian_filter(valid.astype(float), sigma)
+            a = np.where(den > 1e-3, num / np.maximum(den, 1e-3), np.nan)
+        out[k] = _fill_nearest(a)
+    return out
+
+
+def fit_calibration(real_dir: Path, domain: Domain, start: str = "2022-01-01", end: str = "2022-03-31",
+                    seed: int = 42, sigma: float = 1.0) -> Calibration:
+    """Fit the generator to the REAL harmonized store: mean maps + a few scalars tuned so the synthetic Q1 matches
+    the real Q1's eddy-driven SLA variability and wind statistics."""
+    zpath = Path(real_dir) / "zarr" / "oceanembed.zarr"
+    if not zpath.exists():
+        raise FileNotFoundError(f"no real store at {zpath}; calibration needs the real data")
+    sl = slice(start, end)
+
+    def load(group: str, var: str) -> xr.DataArray:
+        a = xr.open_zarr(zpath, group=group, consolidated=False)[var].sel(time=sl)
+        if group != "glorys" and "depth" in a.dims:       # the real SSS group carries a singleton depth dimension
+            a = a.isel(depth=0, drop=True)
+        if group in ("sst", "sss", "ssh", "glorys"):
+            # Copernicus subsets end exactly on the domain edge, so the regridded outer ring of cells holds only
+            # 50-67% of the true value (partial coverage). Drop that ring rather than fit the artefact.
+            interior = np.zeros((a.sizes["lat"], a.sizes["lon"]), dtype=bool)
+            interior[1:-1, 1:-1] = True
+            a = a.where(xr.DataArray(interior, dims=("lat", "lon"), coords={"lat": a.lat, "lon": a.lon}))
+        return a.load()
+
+    lat, lon = make_grid(domain)
+    sst, sss, sla, ws = load("sst", "analysed_sst"), load("sss", "sos"), load("ssh", "sla"), load("winds", "ws")
+    thetao = load("glorys", "thetao").transpose("time", "depth", "lat", "lon")
+    for a in (sst, sss, sla, ws, thetao):
+        assert np.array_equal(a.lat, lat) and np.array_equal(a.lon, lon), "real store grid differs from the domain grid"
+    cal = Calibration(
+        sst_map=_smooth_map(sst.mean("time", skipna=True).values, sigma),
+        sss_map=_smooth_map(sss.mean("time", skipna=True).values, sigma),
+        sla_map=_smooth_map(sla.mean("time", skipna=True).values, sigma),
+        tbg=_fill_profiles(thetao.mean("time", skipna=True).values, sigma * 0.5),
+        source=f"real store {zpath.parent.parent} {start}..{end}")
+    prepare(cal, lat, lon, doys=pd.date_range(start, end).dayofyear)
+
+    sea, _ = load_geography(lat, lon, Path(real_dir))
+    tgt_ws_mean, tgt_ws_std = float(np.nanmean(ws.values)), float(np.nanstd(ws.values))
+    lon2, lat2 = np.meshgrid(lon, lat)
+    days = pd.date_range(start, end)
+    day_index = lambda d: int((np.datetime64(d) - ORIGIN) / np.timedelta64(1, "D"))  # noqa: E731
+
+    def detrend(a: np.ndarray) -> np.ndarray:
+        """Remove each cell's linear trend in time (the Q1 seasonal drift), leaving eddy / synoptic anomalies."""
+        t = np.arange(a.shape[0], dtype=float)
+        t -= t.mean()
+        af = np.nan_to_num(a - np.nanmean(a, axis=0))
+        slope = np.tensordot(t, af, axes=(0, 0)) / np.sum(t ** 2)
+        out = a - np.nanmean(a, axis=0) - t.reshape((-1,) + (1,) * (a.ndim - 1)) * slope
+        return np.where(np.isnan(a), np.nan, out)
+
+    real_anom = detrend(sla.values)
+    tgt_std, tgt_p = float(np.nanstd(real_anom)), float(np.nanpercentile(np.abs(real_anom), 99.5))
+    best = (np.inf, 1.0, 1.0)
+    for dens in (1.0, 2.0, 3.0, 4.0, 6.0):                  # eddy density x amplitude: match the pooled std AND the tail
+        ed = _eddy_params(seed, int(round(N_EDDIES * dens)))
+        stack = np.stack([_sla_eddies(day_index(d), ed, lat2, lon2) for d in days[::3]])
+        stack = np.where(sea, stack - stack.mean(axis=0), np.nan)
+        for amp in (0.6, 0.8, 1.0, 1.3, 1.6, 2.0, 2.5):
+            std, p = float(np.nanstd(amp * stack)), float(np.nanpercentile(np.abs(amp * stack), 99.5))
+            loss = np.log(std / tgt_std) ** 2 + np.log(p / tgt_p) ** 2
+            if loss < best[0]:
+                best = (loss, dens, amp)
+    cal.eddy_density, cal.eddy_scale = best[1], best[2]
+    # coupling of SLA to SST and to the thermocline, regressed on the real detrended anomalies
+    sst_a, t100_a = detrend(sst.values), detrend(thetao.sel(depth=100.0, method="nearest").values)
+    ok = ~np.isnan(real_anom) & ~np.isnan(sst_a)
+    cal.sst_sla_coef = float(np.clip(np.cov(real_anom[ok], sst_a[ok])[0, 1] / np.var(real_anom[ok]), 0.0, 12.0))
+    ok = ~np.isnan(real_anom) & ~np.isnan(t100_a)
+    slope100 = np.cov(real_anom[ok], t100_a[ok])[0, 1] / np.var(real_anom[ok])      # deg C per metre of SLA at 100 m
+    z = thetao.depth.values.astype(float)
+    grad = (cal.tbg[np.argmin(abs(z - 125))] - cal.tbg[np.argmin(abs(z - 75))]) / 50.0   # deg C per m, negative
+    cal.heave_per_m = float(np.clip(slope100 / abs(np.nanmean(np.where(sea, grad, np.nan))), 50.0, 800.0))
+    # refine: match the slope the synthetic field REALISES (local gradients differ from the domain mean)
+    ed = _eddy_params(seed, int(round(N_EDDIES * cal.eddy_density)))
+    sa = np.stack([cal.eddy_scale * _sla_eddies(day_index(d), ed, lat2, lon2) for d in days[::3]])
+    sa = np.where(sea, sa - sa.mean(axis=0), np.nan)
+    k100 = int(np.argmin(abs(z - 100.0)))
+    for _ in range(3):
+        t100s = np.stack([_heave(cal.tbg, z, cal.heave_per_m * np.nan_to_num(x))[k100] for x in sa])
+        t100s = np.where(np.isnan(sa), np.nan, t100s - np.nanmean(t100s, axis=0))
+        ok = ~np.isnan(sa)
+        syn_slope = np.cov(sa[ok], t100s[ok])[0, 1] / np.var(sa[ok])
+        cal.heave_per_m = float(np.clip(cal.heave_per_m * slope100 / max(syn_slope, 1e-6), 50.0, 800.0))
+    # what the eddy heave does not explain at 100 m (raw, incl. the Q1 drift): pooled std of the residual
+    t100 = thetao.sel(depth=100.0, method="nearest").values
+    resid = (t100 - np.nanmean(t100, axis=0)) - slope100 * (sla.values - np.nanmean(sla.values, axis=0))
+    cal.sub_noise = float(np.nanstd(np.where(sea[None], resid, np.nan)))
+    # wind strength / variability: fixed-point iteration on the synthetic Q1 wind speed
+    g = np.exp(-((lat2 - 12) / 12) ** 2)
+    jet = 1.0 + 0.8 * np.exp(-(((lat2 - 12) / 5) ** 2 + ((lon2 - 55) / 6) ** 2))
+    for _ in range(8):
+        speeds = []
+        for d in days[::2]:
+            m = np.cos(2 * np.pi * (int(d.dayofyear) - 1) / 365.25 - 2 * np.pi * 205 / 365.25)
+            u, v = _winds(m, g, jet, _daily_rng(seed, day_index(d), 2), lat2.shape, cal.wind_ne_scale, cal.wind_noise_scale)
+            speeds.append(np.hypot(u, v)[sea])
+        speeds = np.concatenate(speeds)
+        cal.wind_ne_scale = float(np.clip(cal.wind_ne_scale * tgt_ws_mean / speeds.mean(), 0.3, 12.0))
+        cal.wind_noise_scale = float(np.clip(cal.wind_noise_scale * tgt_ws_std / max(speeds.std(), 1e-6), 0.3, 8.0))
+    return cal
+
+
 def compute_day(day: np.datetime64, lat: np.ndarray, lon: np.ndarray, sea: np.ndarray, floor_m: np.ndarray,
-                depths: np.ndarray, eddies: dict, seed: int) -> dict[str, np.ndarray]:
-    """All fields for one day, deterministic in (day, seed) only — independent of chunking."""
+                depths: np.ndarray, eddies: dict, seed: int, cal: Calibration | None = None) -> dict[str, np.ndarray]:
+    """All fields for one day, deterministic in (day, seed) only — independent of chunking. With `cal`, the
+    real-data-calibrated variant is used (real mean maps + anomalies); without it, the parametric ocean."""
     d = int((day - ORIGIN) / np.timedelta64(1, "D"))
     doy = int(pd.Timestamp(day).dayofyear)
     th = 2 * np.pi * (doy - 1) / 365.25
@@ -131,9 +352,14 @@ def compute_day(day: np.datetime64, lat: np.ndarray, lon: np.ndarray, sea: np.nd
     m = np.cos(th - 2 * np.pi * 205 / 365.25)                     # +1 SW monsoon, -1 NE monsoon
 
     # sea-level anomaly / absolute dynamic topography
-    sla = (_sla_eddies(d, eddies, lat2, lon2)
-           + 0.06 * np.sin(th - 1.0) * np.exp(-((lat2 - 12) / 10) ** 2)
-           + _smooth_noise(_daily_rng(seed, d, 1), shape, 4, 0.01))
+    seasonal_sla = 0.06 * np.sin(th - 1.0) * np.exp(-((lat2 - 12) / 10) ** 2)
+    if cal is None:
+        sla = _sla_eddies(d, eddies, lat2, lon2) + seasonal_sla + _smooth_noise(_daily_rng(seed, d, 1), shape, 4, 0.01)
+        sla_anom = sla
+    else:
+        sla_anom = (cal.eddy_scale * _sla_eddies(d, eddies, lat2, lon2) + (seasonal_sla - cal.q1["sla_seas"])
+                    + _smooth_noise(_daily_rng(seed, d, 1), shape, 4, 0.01))
+        sla = cal.sla_map + sla_anom
     mdt = 0.7 + 0.35 * np.exp(-((lat2 - 9) / 7) ** 2)
     adt = mdt + sla
 
@@ -141,21 +367,28 @@ def compute_day(day: np.datetime64, lat: np.ndarray, lon: np.ndarray, sea: np.nd
     g = np.exp(-((lat2 - 12) / 12) ** 2)
     jet = 1.0 + 0.8 * np.exp(-(((lat2 - 12) / 5) ** 2 + ((lon2 - 55) / 6) ** 2))       # Somali-jet enhancement
     rw = _daily_rng(seed, d, 2)
-    uwnd = g * jet * (2.0 * m + 4.5 * max(m, 0.0)) + _smooth_noise(rw, shape, 5, 1.2)
-    vwnd = g * jet * (1.5 * m + 1.5 * max(m, 0.0)) + _smooth_noise(rw, shape, 5, 1.0)
+    uwnd, vwnd = _winds(m, g, jet, rw, shape, *((cal.wind_ne_scale, cal.wind_noise_scale) if cal else (1.0, 1.0)))
     ws = np.hypot(uwnd, vwnd)
 
     # SST: latitudinal + seasonal + upwelling + eddy signal
     amp = 3.0 * np.clip((lat2 - 8) / 20, 0, 1)
     upw = 3.2 * mon * np.exp(-(((lat2 - 14) / 6) ** 2 + ((lon2 - 57) / 4.5) ** 2))
-    sst = (29.8 - 0.14 * np.maximum(lat2 - 10, 0) + amp * np.cos(th - 2 * np.pi * 125 / 365.25)
-           - upw + 5.0 * sla + _smooth_noise(_daily_rng(seed, d, 3), shape, 3, 0.15))
+    if cal is None:
+        sst = (29.8 - 0.14 * np.maximum(lat2 - 10, 0) + amp * np.cos(th - 2 * np.pi * 125 / 365.25)
+               - upw + 5.0 * sla + _smooth_noise(_daily_rng(seed, d, 3), shape, 3, 0.15))
+    else:
+        sst = (cal.sst_map + (_sst_seasonal(doy, lat2) - cal.q1["sst_seas"]) - upw + cal.sst_sla_coef * sla_anom
+               + _smooth_noise(_daily_rng(seed, d, 3), shape, 3, 0.15))
     sst = np.clip(sst, 15.0, 34.0)
 
     # SSS: fresh Bay of Bengal plume (peaks Sep-Nov), salty northern Arabian Sea
     fresh = 0.5 + 0.5 * np.cos(th - 2 * np.pi * 270 / 365.25)
-    sos = (35.4 - 3.2 * fresh * np.exp(-(((lat2 - 18) / 5) ** 2 + ((lon2 - 89) / 5) ** 2))
-           + 1.4 * np.exp(-((lat2 - 24) / 4) ** 2) * (lon2 < 68) + _smooth_noise(_daily_rng(seed, d, 4), shape, 3, 0.1))
+    plume = np.exp(-(((lat2 - 18) / 5) ** 2 + ((lon2 - 89) / 5) ** 2))
+    if cal is None:
+        sos = (35.4 - 3.2 * fresh * plume + 1.4 * np.exp(-((lat2 - 24) / 4) ** 2) * (lon2 < 68)
+               + _smooth_noise(_daily_rng(seed, d, 4), shape, 3, 0.1))
+    else:
+        sos = cal.sss_map - 3.2 * (fresh - cal.q1["fresh"]) * plume + _smooth_noise(_daily_rng(seed, d, 4), shape, 3, 0.1)
     sos = np.clip(sos, 28.0, 38.0)
 
     # geostrophic + Ekman currents
@@ -168,13 +401,22 @@ def compute_day(day: np.datetime64, lat: np.ndarray, lon: np.ndarray, sea: np.nd
     u, v = ug + 0.02 * (uwnd + vwnd) / np.sqrt(2), vg + 0.02 * (vwnd - uwnd) / np.sqrt(2)
 
     # subsurface temperature: mixed layer + thermocline whose depth follows SSH and upwelling
-    D = np.clip(110.0 + 450.0 * sla - 70.0 * upw / 3.2, 25.0, 300.0)
-    w = 0.35 * D + 10.0
     z = depths[:, None, None]
-    tdeep = 6.5 + 13.0 * np.exp(-z / 420.0)      # deep profile roughly matches real GLORYS at 500/1000 m
-    sig = lambda x: 1.0 / (1.0 + np.exp(-x))  # noqa: E731
-    f_z = sig((D - z) / w) / sig(D / w)                             # equals 1 at z=0, decreasing with depth
-    thetao = tdeep + (sst - tdeep) * f_z
+    if cal is None:
+        D = np.clip(110.0 + 450.0 * sla - 70.0 * upw / 3.2, 25.0, 300.0)
+        w = 0.35 * D + 10.0
+        tdeep = 6.5 + 13.0 * np.exp(-z / 420.0)      # deep profile roughly matches real GLORYS at 500/1000 m
+        sig = lambda x: 1.0 / (1.0 + np.exp(-x))  # noqa: E731
+        f_z = sig((D - z) / w) / sig(D / w)                             # equals 1 at z=0, decreasing with depth
+        thetao = tdeep + (sst - tdeep) * f_z
+    else:
+        # real mean profile, heaved by the eddy field (and shoaled by upwelling); SST anomalies fill the mixed layer
+        tdisp = _heave(cal.tbg, depths, cal.heave_per_m * sla_anom - 70.0 * upw / 3.2)
+        thetao = tdisp + (sst - tdisp[0]) * np.exp(-((z / 60.0) ** 4))   # flat-topped: uniform through ~40 m
+        if cal.sub_noise > 0:
+            prof = (1 - np.exp(-z / 40.0)) * np.exp(-np.maximum(z - 100.0, 0.0) / 300.0)
+            prof = prof / ((1 - np.exp(-100.0 / 40.0)))                       # = 1 at 100 m
+            thetao = thetao + cal.sub_noise * prof * _slow_field(d, shape, seed)[None]
     thetao += _smooth_noise(_daily_rng(seed, d, 5), shape, 3, 0.08)[None] * np.exp(-z / 400.0)
 
     # observation gaps (NaN + mask=0), coastal + blob patterns like the real products
@@ -203,8 +445,9 @@ def compute_day(day: np.datetime64, lat: np.ndarray, lon: np.ndarray, sea: np.nd
 
 
 # ------------------------------------------------------------------------------------------ writing
-def build_chunk(days: pd.DatetimeIndex, lat, lon, sea, floor_m, depths, eddies, seed) -> dict[str, xr.Dataset]:
-    per_day = [compute_day(np.datetime64(d), lat, lon, sea, floor_m, depths, eddies, seed) for d in days]
+def build_chunk(days: pd.DatetimeIndex, lat, lon, sea, floor_m, depths, eddies, seed,
+                cal: Calibration | None = None) -> dict[str, xr.Dataset]:
+    per_day = [compute_day(np.datetime64(d), lat, lon, sea, floor_m, depths, eddies, seed, cal) for d in days]
     out: dict[str, xr.Dataset] = {}
     for ch, vars_ in CHANNELS.items():
         data = {}
@@ -218,26 +461,32 @@ def build_chunk(days: pd.DatetimeIndex, lat, lon, sea, floor_m, depths, eddies, 
             data[f"{name}_mask"] = (dims, (~np.isnan(arr)).astype("int8"))
         ds = xr.Dataset(data, coords=coords)
         ds.attrs.update(data_source="synthetic", synthetic_warning=BANNER)
+        if cal is not None:
+            ds.attrs["calibrated_to"] = cal.source
         out[ch] = ds
     return out
 
 
 def generate(start: str, end: str, out_dir: Path, domain: Domain, depths_m: list[int], seed: int = 42,
-             processed_dir: Path | None = None, chunk_days: int = 30) -> Path:
+             processed_dir: Path | None = None, chunk_days: int = 30, calibration: Calibration | None = None) -> Path:
     real_dir = (REPO_ROOT / "data" / "processed").resolve()
     if Path(out_dir).resolve() == real_dir:
         raise ValueError("refusing to write synthetic data into the real processed dir (data/processed)")
     lat, lon = make_grid(domain)
     sea, floor_m = load_geography(lat, lon, processed_dir)
     depths = np.asarray(depths_m, dtype=float)
-    eddies = _eddy_params(seed)
+    eddies = _eddy_params(seed, int(round(N_EDDIES * (calibration.eddy_density if calibration else 1.0))))
+    if calibration is not None:
+        prepare(calibration, lat, lon)
     days = pd.date_range(start, end, freq="D")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "SYNTHETIC_DATA.txt").write_text(BANNER + f"\nseed={seed}\nrange={start}..{end}\n", encoding="utf-8")
+    (out_dir / "SYNTHETIC_DATA.txt").write_text(
+        BANNER + f"\nseed={seed}\nrange={start}..{end}\ncalibrated_to={calibration.source if calibration else 'none'}\n",
+        encoding="utf-8")
     for i in range(0, len(days), chunk_days):
         chunk = days[i:i + chunk_days]
-        for ch, ds in build_chunk(chunk, lat, lon, sea, floor_m, depths, eddies, seed).items():
+        for ch, ds in build_chunk(chunk, lat, lon, sea, floor_m, depths, eddies, seed, calibration).items():
             append_zarr(ds, Channel(name=ch, label=ch, source="synthetic", variables=CHANNELS[ch],
                                     native_resolution_deg=domain.resolution_deg, units=""), out_dir)
         print(f"  generated {chunk[0].date()} .. {chunk[-1].date()}")
@@ -250,15 +499,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start", default=None, help="default: first day of the demo train period")
     ap.add_argument("--end", default=None, help="default: last day of the demo test period")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--fit-calibration", action="store_true", help="fit the generator to the REAL store, save it, and exit")
+    ap.add_argument("--real-dir", default=str(REPO_ROOT / "data" / "processed"), help="real processed dir for --fit-calibration")
+    ap.add_argument("--no-calibration", action="store_true", help="ignore an existing calibration.npz")
     args = ap.parse_args(argv)
     cfg = load_base_config(override=args.config)
     if cfg.data_source != "synthetic":
         raise SystemExit("config data_source is not 'synthetic' — refusing to generate")
+    out = REPO_ROOT / cfg.paths["processed_dir"]
+    cal_path = out / "calibration.npz"
+    if args.fit_calibration:
+        cal = fit_calibration(Path(args.real_dir), cfg.domain, seed=cfg.seed if args.seed is None else args.seed)
+        out.mkdir(parents=True, exist_ok=True)
+        cal.save(cal_path)
+        print(f"saved {cal_path}: eddy density x{cal.eddy_density:.1f}, amplitude x{cal.eddy_scale:.2f}, heave "
+              f"{cal.heave_per_m:.0f} m/m, SST-SLA {cal.sst_sla_coef:.1f} C/m, subsurface residual {cal.sub_noise:.2f} C, "
+              f"wind NE x{cal.wind_ne_scale:.2f}, "
+              f"wind noise x{cal.wind_noise_scale:.2f}")
+        return 0
+    cal = Calibration.load(cal_path) if cal_path.exists() and not args.no_calibration else None
     start = args.start or cfg.periods["train"][0]
     end = args.end or cfg.periods["test"][1]
-    out = REPO_ROOT / cfg.paths["processed_dir"]
-    print(f"{BANNER}\n{start} .. {end} -> {out}")
-    print("store:", generate(start, end, out, cfg.domain, cfg.depths_m, cfg.seed if args.seed is None else args.seed))
+    mode = "calibrated to " + cal.source if cal else "uncalibrated parametric ocean"
+    print(f"{BANNER}\n{start} .. {end} -> {out}  ({mode})")
+    print("store:", generate(start, end, out, cfg.domain, cfg.depths_m, cfg.seed if args.seed is None else args.seed,
+                             calibration=cal))
     return 0
 
 

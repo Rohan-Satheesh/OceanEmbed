@@ -49,5 +49,21 @@ pytest tests/
 `synthetic.py` (`python -m data.synthetic`) writes the same groups/variables/grid/depths/`*_mask` channels as the real
 pipeline into `data/synthetic/zarr/oceanembed.zarr` — monsoon winds and SST, Arabian Sea upwelling, a fresh Bay of
 Bengal plume, eddies that drive SSH/SST/currents/thermocline depth — on the real coastline and seafloor when
-`data/processed/bathymetry/land_sea_mask.nc` exists. It refuses to write into `data/processed/`. The fields are
-physically motivated, not calibrated; scores on them never measure real-ocean skill.
+`data/processed/bathymetry/land_sea_mask.nc` exists. It refuses to write into `data/processed/`. Scores on synthetic
+data never measure real-ocean skill.
+
+**Calibration to the real data.** Uncalibrated, the generator is a parametric ocean that is much too smooth (SST std
+0.8 vs 2.6 C, near-uniform deep water, a SLA-to-thermocline link twice too strong). With the real store present:
+
+```bash
+python -m data.synthetic --fit-calibration     # fits to the real Q1 2022 store -> data/synthetic/calibration.npz
+python -m data.synthetic                       # uses calibration.npz automatically (--no-calibration to ignore it)
+```
+
+The fit keeps the real Q1 **mean maps** (SST, SSS, SLA and the mean temperature profile at every cell) and adds
+seasonality, eddies and noise as anomalies around them. Eddy density and amplitude are grid-searched to match the real
+SLA spread and tail; the SLA-to-thermocline heave and SLA-to-SST coupling are regressed on the real anomalies; wind
+strength and variability and the unexplained subsurface residual are fitted to the real Q1. Eddies vertically *heave*
+the real mean profile, so the surface-to-subsurface relationship is data-derived rather than assumed. Only Q1 is
+anchored to real data; April-December seasonality is still a parametric extrapolation. The fit ignores the outermost ring
+of cells, which is wrong in the current real store (see "Known issue" in the root README).

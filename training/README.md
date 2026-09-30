@@ -13,7 +13,9 @@ Data layer, baselines, training and experiments (PRD Sections 11, 13.6, 14-16, C
   very days it is subtracted from and the model never sees real anomalies (this cost the one-year demo model ~5x RMSE
   before it was made automatic).
 - `experiments.py` — the PRD ablation set (inputs, window, pretraining, physics loss, anomaly framing, U-Net) with
-  identical budgets, resumable.
+  identical budgets, resumable, plus seed repeats (`oceanembed_s1/s2`, `unet_s1/s2`) of the two headline models. The
+  report's "Seed variability" section gives mean +/- std across seeds: a gap between two models smaller than that spread
+  is not a real difference (single-seed differences of ~0.01-0.02 C were within noise on the first synthetic runs).
 - `run_logger.py` — W&B if `WANDB_API_KEY` is set, otherwise JSONL under `runs/`. Every run logs its `data_source`.
 
 All models are scored on the same eval days, masks and metrics, against GLORYS only. Tests: `test_training_data.py`,

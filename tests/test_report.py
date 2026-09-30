@@ -69,3 +69,34 @@ def test_report_warns_when_training_period_is_short(built):
     cfg, root, rep = built
     md = (root / "runs" / "report_synthetic.md").read_text(encoding="utf-8")
     assert "Training period is only 31 days" in md and "smoke test" in md
+
+
+def _row(name, test, val=None, kind="model"):
+    s = {"mean_rmse": test}
+    return {"name": name, "kind": kind, "test": s, "val": {"mean_rmse": val if val is not None else test}}
+
+
+def test_seed_summary_groups_repeats_and_excludes_them_from_ablations():
+    rows = [_row("climatology", 0.8, kind="baseline"), _row("oceanembed", 0.150), _row("oceanembed_s1", 0.160),
+            _row("oceanembed_s2", 0.140), _row("unet", 0.130), _row("unet_s1", 0.135), _row("unet_s2", 0.125),
+            _row("oe_no_physics", 0.145)]
+    seeds = {s["model"]: s for s in R.seed_summary(rows)}
+    assert set(seeds) == {"oceanembed", "unet"} and seeds["oceanembed"]["n_seeds"] == 3
+    assert seeds["oceanembed"]["test_mean"] == pytest.approx(0.150) and seeds["oceanembed"]["test_std"] == pytest.approx(0.010)
+    assert (seeds["unet"]["test_min"], seeds["unet"]["test_max"]) == (0.125, 0.135)
+    names = [a["name"] for a in R.ablation_deltas(rows, "oceanembed")]
+    assert names == ["oceanembed", "unet", "oe_no_physics"]                        # no *_s1 / *_s2 rows
+    assert "oe_no_physics" not in seeds                                            # a lone ablation is not a seed group
+
+
+def test_seed_section_reaches_the_markdown():
+    rows = [_row("oceanembed", 0.150), _row("oceanembed_s1", 0.160), _row("unet", 0.130), _row("unet_s1", 0.134)]
+    report = {"data_source": "synthetic", "periods": {"train": ["2022-01-01", "2022-12-31"]}, "generated_utc": "x",
+              "rows": [dict(r, params=1, test={"mean_rmse": r["test"]["mean_rmse"], "surface_rmse": 0, "rmse_300m_plus": 0,
+                                               "mean_bias": 0, "mean_corr": 0}, val={"mean_rmse": 0}, test_skill_vs_clim=0)
+                       for r in rows],
+              "reference": "oceanembed", "ablations": R.ablation_deltas(rows, "oceanembed"), "seeds": R.seed_summary(rows),
+              "main_model": {"stratified_mean_rmse": {}, "calibration": {"coverage_90": 0.9, "coverage_95": 0.95,
+                                                                        "spread_error_spearman": 0.5, "sharpness": 0.1}}}
+    md = R.to_markdown(report)
+    assert "## Seed variability" in md and "| oceanembed | 2 |" in md and "not meaningful" in md

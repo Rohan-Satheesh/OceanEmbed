@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -51,10 +52,30 @@ def comparison_rows(baselines: dict, experiments: dict[str, dict]) -> list[dict]
     return rows
 
 
+SEED_RE = re.compile(r"^(?P<base>.+?)_s\d+$")          # e.g. oceanembed_s1 -> base "oceanembed"
+
+
 def ablation_deltas(rows: list[dict], reference: str) -> list[dict]:
+    """Deltas vs the reference run. Seed repeats are excluded here: they belong in seed_summary."""
     ref = next(r for r in rows if r["name"] == reference)["test"]["mean_rmse"]
     return [{"name": r["name"], "test_mean_rmse": r["test"]["mean_rmse"], "delta_vs_reference": r["test"]["mean_rmse"] - ref}
-            for r in rows if r["kind"] == "model"]
+            for r in rows if r["kind"] == "model" and not SEED_RE.match(r["name"])]
+
+
+def seed_summary(rows: list[dict]) -> list[dict]:
+    """Mean / std / range of validation and test RMSE across seed repeats (`<name>` plus `<name>_s<k>`)."""
+    bases = sorted({m["base"] for r in rows if (m := SEED_RE.match(r["name"]))})
+    out = []
+    for base in bases:
+        runs = [r for r in rows if r["name"] == base or (SEED_RE.match(r["name"]) and SEED_RE.match(r["name"])["base"] == base)]
+        if len(runs) < 2:
+            continue
+        test = np.array([r["test"]["mean_rmse"] for r in runs])
+        val = np.array([r["val"]["mean_rmse"] for r in runs])
+        out.append({"model": base, "n_seeds": len(runs), "test_mean": float(test.mean()), "test_std": float(test.std(ddof=1)),
+                    "test_min": float(test.min()), "test_max": float(test.max()), "val_mean": float(val.mean()),
+                    "val_std": float(val.std(ddof=1)), "runs": [r["name"] for r in runs]})
+    return out
 
 
 def main_model_analysis(cfg: BaseConfig, main: str, root: Path, stride: int, mc: int) -> dict:
@@ -116,6 +137,19 @@ def to_markdown(report: dict) -> str:
     L += ["", f"## Ablations (reference: `{report['reference']}`; negative delta = better)", "",
           "| run | test RMSE | delta vs reference |", "|---|---:|---:|"]
     L += [f"| {a['name']} | {a['test_mean_rmse']:.3f} | {a['delta_vs_reference']:+.3f} |" for a in report["ablations"]]
+    seeds = report.get("seeds", [])
+    if seeds:
+        L += ["", "## Seed variability (same configuration, different random seeds)", "",
+              "| model | seeds | test RMSE mean +/- std | test range | val RMSE mean +/- std |", "|---|---:|---:|---:|---:|"]
+        L += [f"| {s['model']} | {s['n_seeds']} | {s['test_mean']:.3f} +/- {s['test_std']:.3f} | "
+              f"{s['test_min']:.3f}-{s['test_max']:.3f} | {s['val_mean']:.3f} +/- {s['val_std']:.3f} |" for s in seeds]
+        L += ["", "A difference between two models (or ablations) smaller than these spreads is not meaningful."]
+        if len(seeds) >= 2:
+            (x, y) = sorted(seeds, key=lambda s: s["test_mean"])[:2]
+            gap = y["test_mean"] - x["test_mean"]
+            spread = max(x["test_std"], y["test_std"])
+            L += [f"Best two: `{x['model']}` ({x['test_mean']:.3f}) vs `{y['model']}` ({y['test_mean']:.3f}); gap {gap:.3f} = "
+                  f"{gap / spread:.1f}x the larger seed std." if spread > 0 else ""]
     a = report["main_model"]
     L += ["", f"## Region x season breakdown ({report['reference']}, test mean RMSE)", "", "| stratum | mean RMSE |", "|---|---:|"]
     L += [f"| {k} | {v:.3f} |" for k, v in a["stratified_mean_rmse"].items()]
@@ -139,7 +173,8 @@ def build_report(cfg: BaseConfig, main: str = "oceanembed", reference: str = "oc
     analysis = main_model_analysis(cfg, main, root, stride, mc)
     report = {"data_source": cfg.data_source, "periods": cfg.periods, "reference": reference, "main": main,
               "generated_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-              "caveat": GLORYS_CAVEAT, "rows": rows, "ablations": ablation_deltas(rows, reference), "main_model": analysis}
+              "caveat": GLORYS_CAVEAT, "rows": rows, "ablations": ablation_deltas(rows, reference), "seeds": seed_summary(rows),
+              "main_model": analysis}
     figs = make_figures(rows, analysis, baselines["depths_m"], runs / "figures")
     (runs / f"report_{cfg.data_source}.json").write_text(json.dumps(report, indent=1, default=float), encoding="utf-8")
     (runs / f"report_{cfg.data_source}.md").write_text(to_markdown(report), encoding="utf-8")

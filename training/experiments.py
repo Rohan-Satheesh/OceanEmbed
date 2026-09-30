@@ -32,6 +32,12 @@ EXPERIMENTS: dict[str, dict] = {
     "oe_in_sst_sss": {"inputs": ["sst", "sss"]},
     "oe_in_sst_ssh": {"inputs": ["sst", "ssh"]},
     "oe_in_sst_ssh_currents": {"inputs": ["sst", "ssh", "currents"]},
+    # Seed repeats of the two headline models (the reference runs above use seed 42): a gap between them is only
+    # meaningful if it exceeds the seed-to-seed spread.
+    "oceanembed_s1": {"seed": 1},
+    "oceanembed_s2": {"seed": 2},
+    "unet_s1": {"model": "unet", "seed": 1},
+    "unet_s2": {"model": "unet", "seed": 2},
 }
 
 
