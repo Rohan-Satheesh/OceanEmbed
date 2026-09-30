@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import earthaccess
+import netCDF4
 
 from data.catalog import Channel, Domain
 from data.retry import retry
@@ -54,6 +55,15 @@ def download(channel: Channel, start: str, end: str, domain: Domain, out_dir: Pa
     return _download_all(granules, out_dir, channel.name, _on_retry)
 
 
+def _is_valid_nc(path: Path) -> bool:
+    """False for a truncated/corrupt file (e.g. left behind by an interrupted download)."""
+    try:
+        with netCDF4.Dataset(path) as ds:
+            return len(ds.variables) > 0
+    except OSError:
+        return False
+
+
 def _download_all(granules: list, out_dir: Path, name: str, on_retry, attempts: int = 4) -> list[Path]:
     """earthaccess.download() logs per-file failures and returns only the files that succeeded —
     it does not raise — so a dropped granule would silently become a gap-filled day downstream.
@@ -63,7 +73,15 @@ def _download_all(granules: list, out_dir: Path, name: str, on_retry, attempts: 
     for attempt in range(1, attempts + 1):
         downloaded = retry(lambda: earthaccess.download(granules, local_path=str(out_dir)), on_retry=on_retry)
         if len(downloaded) >= len(granules):
-            return [Path(p) for p in downloaded]
+            paths = [Path(p) for p in downloaded]
+            corrupt = [p for p in paths if not _is_valid_nc(p)]
+            if not corrupt:
+                return paths
+            # earthaccess skips files that already exist, so delete corrupt ones to force a re-fetch.
+            for p in corrupt:
+                p.unlink()
+            on_retry(attempt, RuntimeError(f"{len(corrupt)} corrupt file(s) deleted for re-download"))
+            continue
         on_retry(attempt, RuntimeError(f"{len(granules) - len(downloaded)} of {len(granules)} granules missing"))
     raise RuntimeError(
         f"'{name}': only {len(downloaded)} of {len(granules)} granules downloaded after {attempts} attempts"

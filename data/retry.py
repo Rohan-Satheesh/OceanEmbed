@@ -14,12 +14,15 @@ T = TypeVar("T")
 def retry(
     fn: Callable[[], T],
     *,
-    attempts: int = 4,
-    base_delay_s: float = 2.0,
-    max_delay_s: float = 60.0,
+    attempts: int = 7,
+    base_delay_s: float = 5.0,
+    max_delay_s: float = 120.0,
     on_retry: Callable[[int, Exception], None] | None = None,
 ) -> T:
-    """Call fn(), retrying on any Exception with exponential backoff + jitter."""
+    """Call fn(), retrying on any Exception with exponential backoff + jitter.
+
+    Defaults wait ~5 min in total (5,10,20,40,80,120s, jittered) so multi-minute DNS/connectivity
+    drops on a home connection don't fail a long historical pull."""
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
