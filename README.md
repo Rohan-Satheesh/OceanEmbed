@@ -88,3 +88,21 @@ The dashboard and every output file carry a "SYNTHETIC DATA" marker.
 | Inference (CF-1.8 NetCDF + Zarr, MC-dropout uncertainty, MLD/D20/TCHP) | `python -m evaluation.predict` |
 | Evaluation report | `python -m evaluation.report` |
 | Dashboard | `streamlit run dashboard/app.py` |
+
+## Running the same pipeline on the real Q1 2022 data
+
+`configs/demo_real_q1.yaml` points the identical pipeline at the real store in `data/processed/` (own run and
+checkpoint folders, so nothing overwrites the synthetic results):
+
+```bash
+python scripts/run_demo.py --config configs/demo_real_q1.yaml --stride 1 --epochs 60    # ~3 min
+$env:OCEANEMBED_CONFIG='configs/demo_real_q1.yaml'; streamlit run dashboard/app.py       # PowerShell
+```
+
+Only 90 days exist, so the split is by month (train January, validate February, test March) instead of whole
+years. One training month plus a January-to-March seasonal shift make this a **smoke test of the real-data path**,
+not a skill assessment: the learned models do worse than a 7-day-lag persistence baseline here, which is expected
+(persistence uses GLORYS from a week earlier, which a satellite-only reconstruction would not have in operation).
+The synthetic ocean is also much smoother than the real one (e.g. SST spatial-temporal std 0.8 vs 2.6 deg C in
+Jan-Mar 2022, and near-zero spatial variation at 500-1000 m), so synthetic scores are far more optimistic.
+Meaningful results need the multi-year pull.

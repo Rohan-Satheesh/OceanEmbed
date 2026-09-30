@@ -101,6 +101,10 @@ def to_markdown(report: dict) -> str:
     L = [f"# OceanEmbed evaluation report ({report['data_source']})", ""]
     if report["data_source"] == "synthetic":
         L += [f"> **{SYNTHETIC_BANNER}**", ""]
+    days = (np.datetime64(report["periods"]["train"][1]) - np.datetime64(report["periods"]["train"][0])).astype(int) + 1
+    if days < 365:
+        L += [f"> **Training period is only {days} days (< 1 year).** Splits are chronological but seasonally uneven, so "
+              "treat these numbers as a small-sample smoke test, not a skill assessment.", ""]
     L += [f"_{GLORYS_CAVEAT}_", "", f"Generated {report['generated_utc']}. Periods: {report['periods']}.", "",
           "## Model comparison (identical eval days, masks, metrics)", "",
           "| model | params | val RMSE | test RMSE | test surface | test >=300 m | test bias | test corr | skill vs clim |",

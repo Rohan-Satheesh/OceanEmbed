@@ -56,7 +56,13 @@ def load_arrays(cfg: BaseConfig, root: Path = REPO_ROOT, start: str | None = Non
     sl = slice(start, end)
     chans = []
     for group, var in INPUTS:
-        chans.append(xr.open_zarr(path, group=group, consolidated=False)[var].sel(time=sl))
+        a = xr.open_zarr(path, group=group, consolidated=False)[var].sel(time=sl)
+        for extra in [d for d in a.dims if d not in ("time", "lat", "lon")]:
+            # The real SSS group carries a singleton `depth` (0 m) dimension; drop any such singleton.
+            if a.sizes[extra] != 1:
+                raise ValueError(f"{group}.{var} has a non-singleton extra dimension '{extra}'")
+            a = a.isel({extra: 0}, drop=True)
+        chans.append(a)
     tgt = xr.open_zarr(path, group=TARGET[0], consolidated=False)[TARGET[1]].sel(time=sl)
     ref = chans[0]
     for c in chans + [tgt]:

@@ -1,0 +1,22 @@
+# Runs the SAME pipeline as the synthetic demo on the REAL Q1 2022 data already in data/processed/, e.g.
+#   python scripts/run_demo.py --config configs/demo_real_q1.yaml --stride 1
+#
+# Only 90 days exist, so the chronological split is by MONTH (not whole years as in PRD Section 11):
+# January trains, February validates, March tests (last 3 days of train/validation are dropped as a buffer).
+# One month of training and a Jan -> Mar seasonal shift make this a small-sample smoke test of the real-data
+# path, NOT a skill assessment; the full 2015-2024 (or at least multi-year) pull is needed for that.
+# Validation is GLORYS-only (no ARGO pull).
+#
+# Runs and checkpoints get their own folders so nothing overwrites the synthetic demo's results.
+
+data_source: real
+
+periods:
+  train: ["2022-01-01", "2022-01-31"]
+  validation: ["2022-02-01", "2022-02-28"]
+  test: ["2022-03-01", "2022-03-31"]
+
+paths:
+  processed_dir: data/processed
+  runs_dir: training/runs/real_q1
+  checkpoints_dir: training/runs/real_q1/checkpoints

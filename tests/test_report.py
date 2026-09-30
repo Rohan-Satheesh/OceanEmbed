@@ -63,3 +63,9 @@ def test_report_files_banner_and_caveat(built):
     assert set(rep["figures"]) == {"rmse_by_depth.png", "reliability.png"}
     assert all((runs / "figures" / f).stat().st_size > 1000 for f in rep["figures"])
     assert json.loads((runs / "report_synthetic.json").read_text(encoding="utf-8"))["data_source"] == "synthetic"
+
+
+def test_report_warns_when_training_period_is_short(built):
+    cfg, root, rep = built
+    md = (root / "runs" / "report_synthetic.md").read_text(encoding="utf-8")
+    assert "Training period is only 31 days" in md and "smoke test" in md

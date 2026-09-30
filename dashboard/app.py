@@ -54,6 +54,9 @@ ds = load(str(path))
 warning = D.data_banner(ds)
 if warning:
     st.error(f"{warning}. Do not read these maps or scores as real ocean results.")
+note = D.data_note(ds)
+if note:
+    st.info(note)
 st.caption("Reconstruction of daily 0.25 deg temperature at 15 depths from six surface satellite variables. "
            "Comparisons are against GLORYS only (GLORYS assimilates ARGO), so agreement is not independent validation. "
            f"Model version: {ds.attrs.get('model_version', 'unknown')}.")

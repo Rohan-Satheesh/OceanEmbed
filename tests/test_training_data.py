@@ -97,3 +97,24 @@ def test_baselines_run_end_to_end_and_learn(small):
         # the surface->subsurface signal exists, so the RF must beat a wrong-season climatology at the surface
         assert models["random_forest"]["summary"]["surface_rmse"] < models["climatology"]["summary"]["surface_rmse"]
     assert "GLORYS only" in res["reference"]
+
+
+def test_loader_drops_singleton_depth_like_the_real_sss_group(small, tmp_path):
+    """The real store's SSS group has dims (time, depth=1, lat, lon); the synthetic one does not."""
+    import shutil
+
+    import xarray as xr
+
+    cfg, root, ref = small
+    shutil.copytree(root / "syn", tmp_path / "syn")
+    zpath = tmp_path / "syn" / "zarr" / "oceanembed.zarr"
+    sss = xr.open_zarr(zpath, group="sss", consolidated=False).load()
+    sss = sss.expand_dims(depth=[0.0], axis=1)
+    assert sss["sos"].dims == ("time", "depth", "lat", "lon")
+    sss.to_zarr(zpath, group="sss", mode="w")
+    arr = D.load_arrays(cfg, tmp_path)
+    assert arr.x.shape == ref.x.shape and np.array_equal(arr.x, ref.x, equal_nan=True)
+    bad = sss.expand_dims(extra=[1, 2])
+    bad.to_zarr(zpath, group="sss", mode="w")
+    with pytest.raises(ValueError, match="non-singleton"):
+        D.load_arrays(cfg, tmp_path)

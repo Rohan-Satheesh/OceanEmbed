@@ -106,3 +106,11 @@ def test_app_without_predictions_explains_how_to_generate(monkeypatch, tmp_path)
     monkeypatch.setenv("OCEANEMBED_PREDICTIONS", str(tmp_path / "missing.zarr"))
     at = AppTest.from_file(APP, default_timeout=60).run()
     assert not at.exception and any("evaluation.predict" in e.value for e in at.error)
+
+
+def test_data_note_only_for_real_data(ds):
+    assert D.data_note(ds) is None                                             # synthetic gets the red banner instead
+    real = ds.copy()
+    real.attrs = {**ds.attrs, "data_source": "real"}
+    note = D.data_note(real)
+    assert note.startswith("Real data.") and str(ds.time.values[0])[:10] in note and "smoke test" in note

@@ -224,7 +224,7 @@ def fit(cfg: BaseConfig, tc: TrainConfig, root: Path = REPO_ROOT, device: str | 
     norm_t = (torch.from_numpy(norm.y_mean).float().to(dev), torch.from_numpy(norm.y_std).float().to(dev))
     depths = torch.from_numpy(arrays.depth).float().to(dev)
 
-    logger = RunLogger(tc.name, {**asdict(tc), "data_source": cfg.data_source, "periods": cfg.periods}) if log else None
+    logger = RunLogger(f"{tc.name}-{cfg.data_source}", {**asdict(tc), "data_source": cfg.data_source, "periods": cfg.periods}) if log else None
     lg = (lambda m, s=None: logger.log(m, s)) if logger else (lambda m, s=None: None)
     t0 = time.time()
     model = build_model(tc, arrays).to(dev)
@@ -285,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", default=str(REPO_ROOT / "configs" / "demo.yaml"), help="override YAML; 'none' = base only")
     ap.add_argument("--model", default="oceanembed", choices=["oceanembed", "unet"])
     ap.add_argument("--name", default=None)
+    ap.add_argument("--eval-stride", type=int, default=None, help="score every Nth day of validation/test (default 3)")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--window", type=int, default=None)
     ap.add_argument("--no-pretrain", action="store_true", help="ablation: skip MAE embedding pretraining")
@@ -297,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
     tc = TrainConfig(model=args.model, name=args.name or args.model)
     if args.epochs is not None:
         tc.epochs = args.epochs
+    if args.eval_stride is not None:
+        tc.eval_stride = args.eval_stride
     if args.window is not None:
         tc.window = args.window
     if args.no_pretrain:

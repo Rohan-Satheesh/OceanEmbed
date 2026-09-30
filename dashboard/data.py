@@ -56,6 +56,15 @@ def data_banner(ds: xr.Dataset) -> str | None:
     return ds.attrs.get("synthetic_warning") if ds.attrs.get("data_source") == "synthetic" else None
 
 
+def data_note(ds: xr.Dataset) -> str | None:
+    """Neutral note shown for real-data runs (synthetic runs get the red banner instead)."""
+    if ds.attrs.get("data_source") == "synthetic":
+        return None
+    t = ds.time.values
+    return (f"Real data. Evaluation days span {str(t[0])[:10]} to {str(t[-1])[:10]}. See the Model performance tab for "
+            "how much data the model was trained on; a short training period means these results are a smoke test.")
+
+
 def map_field(ds: xr.Dataset, var: str, time_idx: int, depth_idx: int = 0) -> xr.DataArray:
     """2-D (lat, lon) field for a map. `error` = reconstruction minus GLORYS (GLORYS only)."""
     if var in DEPTH_FREE:
