@@ -1,0 +1,19 @@
+# Demo override of configs/base.yaml, applied with
+#   load_base_config(override="configs/demo.yaml")
+# Runs the whole pipeline on SYNTHETIC data (data/synthetic/) so Chunks 4-8 can be built and
+# demoed while the real historical pull is incomplete. Swapping to real data = dropping this
+# override (or pointing processed_dir back at data/processed).
+#
+# Same whole-year, chronological, no-shuffle rule as the full split (PRD Section 11), but with
+# one training year. Scores on synthetic data only show the pipeline works end to end; they say
+# nothing about how well the model reconstructs the real ocean. Validation is GLORYS-only.
+
+data_source: synthetic
+
+periods:
+  train: ["2022-01-01", "2022-12-31"]
+  validation: ["2023-01-01", "2023-12-31"]
+  test: ["2024-01-01", "2024-12-31"]
+
+paths:
+  processed_dir: data/synthetic

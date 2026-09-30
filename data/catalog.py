@@ -120,12 +120,25 @@ class BaseConfig:
     periods: dict[str, list[str]]
     paths: dict[str, str]
     seed: int
+    data_source: str = "real"  # "real" | "synthetic" (demo config); logged with every run
 
 
-def load_base_config(path: Path | str | None = None) -> BaseConfig:
+def _deep_merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for k, v in override.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def load_base_config(path: Path | str | None = None, override: Path | str | None = None) -> BaseConfig:
+    """Load configs/base.yaml (or `path`), optionally deep-merging an override YAML on top
+    (e.g. configs/demo.yaml: demo split + synthetic-data paths)."""
     path = Path(path) if path else CONFIG_DIR / "base.yaml"
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
+    if override:
+        with open(override, encoding="utf-8") as f:
+            raw = _deep_merge(raw, yaml.safe_load(f) or {})
     return BaseConfig(
         project=raw["project"],
         domain=Domain(**raw["domain"]),
@@ -133,4 +146,5 @@ def load_base_config(path: Path | str | None = None) -> BaseConfig:
         periods=raw["periods"],
         paths=raw["paths"],
         seed=raw["seed"],
+        data_source=raw.get("data_source", "real"),
     )
