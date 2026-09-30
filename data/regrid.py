@@ -63,7 +63,11 @@ def _weights_path(cache_dir: Path, src: xr.Dataset, domain: Domain) -> Path:
             "source dataset has no 'lat'/'lon' dims — call standardize_latlon() before regridding"
         )
     src_shape = f"{src.sizes['lat']}x{src.sizes['lon']}"
-    key = f"{src_shape}_{domain.lat_min}_{domain.lat_max}_{domain.lon_min}_{domain.lon_max}_{domain.resolution_deg}"
+    # The source EXTENT is part of the key: two sources with the same shape but different coverage need different
+    # weights, and reusing the wrong file silently mis-weights every cell.
+    la, lo = src["lat"].values, src["lon"].values
+    extent = f"{la[0]:.5f}_{la[-1]:.5f}_{lo[0]:.5f}_{lo[-1]:.5f}"
+    key = f"{src_shape}_{extent}_{domain.lat_min}_{domain.lat_max}_{domain.lon_min}_{domain.lon_max}_{domain.resolution_deg}"
     digest = hashlib.sha1(key.encode()).hexdigest()[:16]
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / f"conservative_{digest}.nc"
@@ -83,11 +87,35 @@ def build_regridder(src: xr.Dataset, domain: Domain, cache_dir: Path) -> xe.Regr
     )
 
 
+COVERAGE_MIN = 0.999   # a target cell must be (almost) fully covered by the source grid to be trusted
+
+
+def source_coverage(ds: xr.Dataset, regridder: xe.Regridder) -> xr.DataArray:
+    """Fraction (0-1) of each target cell's area covered by the SOURCE grid, ignoring NaN values. Regridding a field
+    of ones gives it: conservative weights normalise by the whole target cell, so a cell that sticks out past the
+    source edge comes back as (covered fraction) x (true value) — silently wrong — unless it is masked."""
+    ones = xr.DataArray(np.ones((ds.sizes["lat"], ds.sizes["lon"])), dims=("lat", "lon"),
+                        coords={"lat": ds["lat"], "lon": ds["lon"]})
+    return regridder(ones)
+
+
 def regrid_dataset(ds: xr.Dataset, domain: Domain, cache_dir: Path) -> xr.Dataset:
-    """Conservatively regrid every data variable in ds onto the common 0.25° domain grid."""
+    """Conservatively regrid every data variable in ds onto the common 0.25° domain grid.
+
+    Target cells only partly covered by the source (the domain edge, when the source was cropped too tightly) are set
+    to NaN rather than returned scaled down, and the count is recorded in `attrs['regrid_partial_cells_masked']`."""
     ds = standardize_latlon(ds)
     regridder = build_regridder(ds, domain, cache_dir)
     out = regridder(ds, keep_attrs=True)
+    covered = source_coverage(ds, regridder) >= COVERAGE_MIN
+    n_bad = int((~covered).sum())
+    if n_bad:
+        print(f"    [warn] {n_bad} target cell(s) are only partly covered by the source grid and were set to NaN "
+              "(download the subset with a margin beyond the domain edge)")
+        for name in out.data_vars:
+            if {"lat", "lon"} <= set(out[name].dims):
+                out[name] = out[name].where(covered)
     out.attrs.update(ds.attrs)
     out.attrs["regrid_method"] = "conservative"
+    out.attrs["regrid_partial_cells_masked"] = n_bad
     return out

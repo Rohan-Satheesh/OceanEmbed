@@ -98,6 +98,35 @@ def range_check(ds: xr.Dataset, var: str) -> dict[str, Any]:
     }
 
 
+EDGE_RATIO_BOUNDS = (0.85, 1.15)   # a healthy edge/inner-neighbour ratio is ~1.00; a partly-covered edge gives 0.25-0.67
+EDGE_MIN_PAIRS = 5                 # ocean cells needed on a side before its ratio means anything
+
+
+def edge_ratio_report(ds: xr.Dataset, var: str) -> dict[str, Any]:
+    """Median ratio of each boundary row/column to the row/column just inside it (time-mean, surface level).
+
+    Catches the partial-coverage regrid bug (edge cells holding a fraction of the true value) without needing a
+    reference: real fields do not change by 15%+ across one 0.25 deg step along the whole edge. Only run on strictly
+    positive fields (SST, SSS, ADT, temperature) where a ratio is meaningful."""
+    da = ds[var]
+    if "depth" in da.dims:
+        da = da.isel(depth=0)
+    other = [d for d in da.dims if d not in ("lat", "lon")]
+    field = (da.mean(other, skipna=True) if other else da).transpose("lat", "lon").values
+    if not np.isfinite(field).any() or np.nanmin(field) <= 0:
+        return {"variable": var, "checked": False, "reason": "field is not strictly positive"}
+    sides = {"south": (field[0, :], field[1, :]), "north": (field[-1, :], field[-2, :]),
+             "west": (field[:, 0], field[:, 1]), "east": (field[:, -1], field[:, -2])}
+    ratios: dict[str, float | None] = {}
+    for name, (edge, inner) in sides.items():
+        ok = np.isfinite(edge) & np.isfinite(inner)
+        ratios[name] = float(np.median(edge[ok] / inner[ok])) if ok.sum() >= EDGE_MIN_PAIRS else None
+    lo, hi = EDGE_RATIO_BOUNDS
+    suspect = [n for n, r in ratios.items() if r is not None and not lo <= r <= hi]
+    return {"variable": var, "checked": True, "median_edge_over_inner": ratios, "suspect_sides": suspect,
+            "pass": not suspect}
+
+
 def run_channel_qc(ds: xr.Dataset, channel: Channel) -> dict[str, Any]:
     report: dict[str, Any] = {"channel": channel.name, "variables": {}}
     for var in channel.variables:
@@ -108,7 +137,12 @@ def run_channel_qc(ds: xr.Dataset, channel: Channel) -> dict[str, Any]:
             "missing_days": missing_day_report(ds, var),
             "coverage": coverage_report(ds, var),
             "range_check": range_check(ds, var),
+            "edge_check": edge_ratio_report(ds, var),
         }
+        edge = report["variables"][var]["edge_check"]
+        if edge.get("checked") and not edge["pass"]:
+            print(f"    [warn] {channel.name}.{var}: boundary cells differ from their inner neighbours on "
+                  f"{edge['suspect_sides']} (ratios {edge['median_edge_over_inner']}) — likely partly-covered edge cells")
     return report
 
 
