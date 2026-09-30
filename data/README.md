@@ -66,4 +66,5 @@ SLA spread and tail; the SLA-to-thermocline heave and SLA-to-SST coupling are re
 strength and variability and the unexplained subsurface residual are fitted to the real Q1. Eddies vertically *heave*
 the real mean profile, so the surface-to-subsurface relationship is data-derived rather than assumed. Only Q1 is
 anchored to real data; April-December seasonality is still a parametric extrapolation. The fit ignores the outermost ring
-of cells, which is wrong in the current real store (see "Known issue" in the root README).
+of cells, because real data pulled before the edge-ring fix has a wrong ring (see "Fixed: wrong values in the outermost
+ring" in the root README); this is harmless once the store is re-pulled.

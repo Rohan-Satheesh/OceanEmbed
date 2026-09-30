@@ -108,11 +108,19 @@ Jan-Mar 2022, near-zero spatial variation at 500-1000 m), so its scores were far
 calibrated to the real Q1 (see `data/README.md`), which closes most of that gap for January-March; the rest of the
 year is still parametric. Meaningful results need the multi-year pull.
 
-## Known issue: wrong values in the outermost ring of grid cells (real store)
+## Fixed: wrong values in the outermost ring of grid cells
 
-In the real SST, SSS, SSH and GLORYS fields the outermost row/column of the 0.25 deg grid holds only a fraction of the
-true value (SST/SSS/SSH x0.50, GLORYS x0.67, corners x0.25 — e.g. 13 C instead of ~27 C at 5N, 48.5E in February). The
-Copernicus subsets are cut exactly at the domain bounds, and the conservative regrid scales partly-covered edge cells
-down instead of flagging them. About 230 ocean cells per field are affected; currents and winds are not (their global
-files are not cropped). Until the download is given a margin and the regrid gets a coverage guard, exclude the outer ring
-when analysing real data, and fix this before the multi-year pull.
+Real SST, SSS, SSH and GLORYS data pulled before commit `13b02be` have a wrong outermost row/column of the 0.25 deg grid
+(SST/SSS/SSH x0.50, GLORYS x0.67, corners x0.25 — e.g. 13 C instead of ~27 C at 5N, 48.5E in February). The Copernicus
+subsets were cut exactly at the domain bounds, so the target cells centred on the edge were only partly covered by the
+source, and the conservative regrid scaled them down instead of flagging them (about 230 ocean cells per field; currents
+and winds were never affected because their global files are not cropped). Now:
+
+- `data/sources/copernicus.py` requests a 0.5 deg margin (and the margin is in the cache filename, so an old tightly
+  cropped file is never reused);
+- `data/regrid.py` sets partly-covered target cells to NaN with a warning rather than returning scaled values, and its
+  weights cache key includes the source extent;
+- `data/qc.py` reports an `edge_check` (edge / inner-neighbour ratio) for every positive field.
+
+**Data pulled before the fix must be re-pulled** (`data/processed_fixed/` holds a corrected Q1 2022 for sst/sss/ssh/glorys;
+interior values are identical to the old store, only the ring differs).
