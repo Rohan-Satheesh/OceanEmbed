@@ -51,5 +51,20 @@ def download(channel: Channel, start: str, end: str, domain: Domain, out_dir: Pa
     if not granules:
         raise RuntimeError(f"no granules found for '{channel.name}' ({channel.short_name}) in [{start}, {end}]")
 
-    downloaded = retry(lambda: earthaccess.download(granules, local_path=str(out_dir)), on_retry=_on_retry)
-    return [Path(p) for p in downloaded]
+    return _download_all(granules, out_dir, channel.name, _on_retry)
+
+
+def _download_all(granules: list, out_dir: Path, name: str, on_retry, attempts: int = 4) -> list[Path]:
+    """earthaccess.download() logs per-file failures and returns only the files that succeeded —
+    it does not raise — so a dropped granule would silently become a gap-filled day downstream.
+    Re-request until every granule is present (already-downloaded files are skipped by
+    earthaccess), and raise if any are still missing."""
+    downloaded: list[str] = []
+    for attempt in range(1, attempts + 1):
+        downloaded = retry(lambda: earthaccess.download(granules, local_path=str(out_dir)), on_retry=on_retry)
+        if len(downloaded) >= len(granules):
+            return [Path(p) for p in downloaded]
+        on_retry(attempt, RuntimeError(f"{len(granules) - len(downloaded)} of {len(granules)} granules missing"))
+    raise RuntimeError(
+        f"'{name}': only {len(downloaded)} of {len(granules)} granules downloaded after {attempts} attempts"
+    )
