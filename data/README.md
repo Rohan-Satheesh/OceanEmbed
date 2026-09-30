@@ -43,3 +43,11 @@ Unit tests for the pure preprocessing logic (regridding, harmonization, QC, bath
 ```bash
 pytest tests/
 ```
+
+## Synthetic demo store
+
+`synthetic.py` (`python -m data.synthetic`) writes the same groups/variables/grid/depths/`*_mask` channels as the real
+pipeline into `data/synthetic/zarr/oceanembed.zarr` — monsoon winds and SST, Arabian Sea upwelling, a fresh Bay of
+Bengal plume, eddies that drive SSH/SST/currents/thermocline depth — on the real coastline and seafloor when
+`data/processed/bathymetry/land_sea_mask.nc` exists. It refuses to write into `data/processed/`. The fields are
+physically motivated, not calibrated; scores on them never measure real-ocean skill.

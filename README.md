@@ -56,3 +56,35 @@ Full requirements: [`OceanEmbed_PRD.md`](OceanEmbed_PRD.md).
 5. **Experiment tracking.** Weights & Biases (free tier) is used if `WANDB_API_KEY` is set in `.env`; otherwise runs fall back to CSV/JSON logs under `training/runs/`. No setup is required for the fallback.
 
 See PRD Section 22.1b for the full step-by-step bootstrap and Section 35 (Chunk 1) for scope.
+
+## Demo on synthetic data (Chunks 4-8)
+
+The real historical data pull is large and slow, so Chunks 4-8 are built and demoed on a **synthetic**
+stand-in with the same groups, grid, depths and `*_mask` channels, kept separate in `data/synthetic/`.
+Switching to real data is a config change (`paths.processed_dir` in `configs/demo.yaml`), not a code change.
+
+```bash
+conda activate oceanembed
+python scripts/run_demo.py            # synthetic store -> baselines -> train -> predict -> report (~10 min, GPU)
+python scripts/run_demo.py --quick    # fewer epochs
+python scripts/run_demo.py --full     # + every ablation (~1 h)
+streamlit run dashboard/app.py        # explore the results
+```
+
+**What the numbers mean.** Everything under the demo config is synthetic. Scores show that the pipeline runs end
+to end, not how well the model reconstructs the real ocean; validation is against GLORYS only (GLORYS assimilates
+ARGO, so there is no independent check), and the demo trains on one year (2022; validation 2023, test 2024).
+The dashboard and every output file carry a "SYNTHETIC DATA" marker.
+
+## Pipeline stages and where they live
+
+| Stage | Command / module |
+|---|---|
+| Real inputs + GLORYS target | `python -m data.pipeline`, `python -m data.target_pipeline` |
+| Synthetic demo store | `python -m data.synthetic` |
+| Baselines (climatology, persistence, random forest) | `python -m training.baselines` |
+| OceanEmbed / U-Net training | `python -m training.train --model oceanembed` |
+| Ablation set | `python -m training.experiments` |
+| Inference (CF-1.8 NetCDF + Zarr, MC-dropout uncertainty, MLD/D20/TCHP) | `python -m evaluation.predict` |
+| Evaluation report | `python -m evaluation.report` |
+| Dashboard | `streamlit run dashboard/app.py` |

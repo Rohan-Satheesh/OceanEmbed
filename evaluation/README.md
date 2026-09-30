@@ -35,3 +35,16 @@ store as every other channel (group `argo_validation`) and the matching NetCDF c
 `tests/test_argo.py` covers QC masking and spatial/temporal matching against synthetic data — no
 network access required. `tests/test_vertical.py` covers the depth-matching interpolation logic
 shared with `/data`.
+
+## Chunks 4-6: metrics, derived products, uncertainty, inference, report
+
+- `metrics.py` — masked RMSE/MAE/bias/corr/R2 per depth, stratified by region (Bay of Bengal, Arabian Sea) and season
+  (monsoon JJAS vs other), plus skill vs climatology.
+- `derived.py` — MLD (0.2 deg C criterion), D20, TCHP from the 15-level profile (coarse, linearly interpolated).
+- `uncertainty.py` — MC-dropout calibration: 90/95% coverage, spread-error Spearman, reliability bins, sharpness.
+- `predict.py` — checkpoint -> per-day CF-1.8 NetCDF (`oceanembed_temp_<YYYYMMDD>.nc`) + one Zarr for the dashboard;
+  stamps `data_source`, model version and (for synthetic runs) a warning attribute.
+- `report.py` — model + ablation comparison, region x season, calibration, figures -> `training/runs/report_<ds>.md`.
+
+Everything is scored against GLORYS only (GLORYS assimilates ARGO). Tests: `test_derived_uncertainty.py`,
+`test_predict.py`, `test_report.py`.
