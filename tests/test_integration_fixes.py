@@ -46,3 +46,18 @@ def test_tls_failure_raises_unless_opted_in(monkeypatch):
     monkeypatch.delenv(argo.INSECURE_TLS_ENV, raising=False)
     with pytest.raises(RuntimeError, match=argo.INSECURE_TLS_ENV):
         argo._download_with_tls_fallback("https://example.invalid/x")
+
+
+def test_append_zarr_long_append_after_short_group(tmp_path):
+    ch = _channel()
+    append_zarr(_ds(pd.date_range("2024-06-01", periods=7).strftime("%Y-%m-%d")), ch, tmp_path)
+    append_zarr(_ds(pd.date_range("2024-06-08", periods=90).strftime("%Y-%m-%d")), ch, tmp_path)
+    out = xr.open_zarr(tmp_path / "zarr" / "oceanembed.zarr", group="t", consolidated=False)
+    assert out.sizes["time"] == 97 and out.time.to_index().is_monotonic_increasing
+
+
+def test_append_zarr_rejects_out_of_order(tmp_path):
+    ch = _channel()
+    append_zarr(_ds(["2024-06-01", "2024-06-02"]), ch, tmp_path)
+    with pytest.raises(ValueError, match="out-of-order"):
+        append_zarr(_ds(["2015-01-01"]), ch, tmp_path)
