@@ -98,8 +98,10 @@ def _day_dataset(t, temp, std, flag, der, lat, lon, depth, ck, model_version: st
     return ds
 
 
-def run_inference(cfg: BaseConfig, checkpoint: Path, split: str = "test", stride: int = 3, mc: int = 10,
-                  root: Path = REPO_ROOT, device: str | None = None, write_netcdf: bool = True) -> Path:
+def predict_split(cfg: BaseConfig, checkpoint: Path, split: str = "test", stride: int = 3, mc: int = 10,
+                  root: Path = REPO_ROOT, device: str | None = None) -> dict:
+    """Run a checkpoint over a split's eval days -> physical-unit mean/std (masked to valid ocean cells),
+    the GLORYS truth on the same days, and the metadata needed to write or score them."""
     dev = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model, tc, norm, ck = load_checkpoint(checkpoint, dev)
     start, end = cfg.periods[split]
@@ -114,24 +116,30 @@ def run_inference(cfg: BaseConfig, checkpoint: Path, split: str = "test", stride
         tr_idx = split_indices(train.time, {"train": cfg.periods["train"]}, 0)["train"]
         clim_n = climatology_norm(fit_climatology(train.y, train.time, tr_idx), norm).to(dev)
     mean, std = predict(model, ds_in, clim_n, tc, arrays, norm, dev, mc=mc)
-    truth = arrays.y[ds_in.targets]
     valid = static_geometry(arrays.y)
-    mean, std = np.where(valid[None], mean, np.nan), np.where(valid[None], std, np.nan)
-    flag = quality_flag(valid)
+    return {"mean": np.where(valid[None], mean, np.nan), "std": np.where(valid[None], std, np.nan),
+            "truth": arrays.y[ds_in.targets], "time": arrays.time[ds_in.targets], "lat": arrays.lat,
+            "lon": arrays.lon, "depth": arrays.depth, "valid": valid, "tc": tc, "ck": ck}
+
+
+def run_inference(cfg: BaseConfig, checkpoint: Path, split: str = "test", stride: int = 3, mc: int = 10,
+                  root: Path = REPO_ROOT, device: str | None = None, write_netcdf: bool = True) -> Path:
+    r = predict_split(cfg, checkpoint, split, stride, mc, root, device)
+    mean, std, times, tc, ck = r["mean"], r["std"], r["time"], r["tc"], r["ck"]
+    flag = quality_flag(r["valid"])
     version = f"{tc.name}-{tc.hash()}"
-    times = arrays.time[ds_in.targets]
     out_dir = root / cfg.paths["processed_dir"] / "outputs"
     nc_dir = out_dir / "netcdf"
     nc_dir.mkdir(parents=True, exist_ok=True)
     days = []
     for i, t in enumerate(times):
-        der = derive(mean[i], arrays.depth)
-        day = _day_dataset(t, mean[i], std[i], flag, der, arrays.lat, arrays.lon, arrays.depth, ck, version)
+        der = derive(mean[i], r["depth"])
+        day = _day_dataset(t, mean[i], std[i], flag, der, r["lat"], r["lon"], r["depth"], ck, version)
         days.append(day)
         if write_netcdf:
             day.to_netcdf(nc_dir / f"oceanembed_temp_{str(t.astype('datetime64[D]')).replace('-', '')}.nc")
     stacked = xr.concat(days, dim="time", data_vars="minimal")      # quality_flag is static: stays (depth, lat, lon)
-    stacked["glorys"] = (("time", "depth", "lat", "lon"), truth.astype("float32"),
+    stacked["glorys"] = (("time", "depth", "lat", "lon"), r["truth"].astype("float32"),
                          {"long_name": "GLORYS reanalysis (comparison reference, not independent)"})
     stacked.attrs.update(days[0].attrs)
     zarr_path = out_dir / "oceanembed_predictions.zarr"
